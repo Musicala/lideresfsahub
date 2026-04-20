@@ -23,6 +23,10 @@ const HUB = {
     'catalina.medina.leal@gmail.com': {
       label: 'Catalina Medina',
       role: 'admin'
+    },
+    'tsocialgs@fundacionsanantonio.org': {
+      label: 'Andrea Herrera',
+      role: 'lider'
     }
     // Agrega aqui los perfiles faltantes (lideres y docentes):
     // 'lider@dominio.com': { label: 'Nombre Lider', role: 'leader' },
