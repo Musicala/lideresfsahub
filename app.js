@@ -32,7 +32,8 @@ const HUB = {
     academicDocs: 'https://musicala.github.io/explicacionartes/',
     protocols: '',
     annualSchedule: '',
-    supportMail: 'mailto:alekcaballeromusic@gmail.com?subject=Soporte%20HUB%20Lideres%20FSA'
+    supportMail: 'mailto:alekcaballeromusic@gmail.com?subject=Soporte%20HUB%20Lideres%20FSA',
+    team: 'https://musicala.github.io/perfilesmusicala//'
   },
   buttons: [
     { id: 'calendar', icon: '\uD83D\uDCC5', title: 'Calendario', subtitle: 'Eventos y agenda del centro', section: 'Operacion diaria', kind: 'module' },
@@ -47,7 +48,7 @@ const HUB = {
     { id: 'samples', icon: '\uD83C\uDFAD', title: 'Muestras de proceso', subtitle: 'Evidencias y preparacion', section: 'Seguimiento academico', kind: 'module' },
 
     { id: 'gallery', icon: '\uD83D\uDDBC', title: 'Galeria de imagenes', subtitle: 'Consulta de evidencias visuales', section: 'Equipo y recursos', kind: 'module' },
-    { id: 'team', icon: '\uD83D\uDC69\u200D\uD83C\uDFEB', title: 'Perfil equipo de docentes', subtitle: 'Perfiles del equipo docente', section: 'Equipo y recursos', kind: 'module' },
+    { id: 'team', icon: '\uD83D\uDC69\u200D\uD83C\uDFEB', title: 'Perfil equipo de docentes', subtitle: 'Perfiles del equipo docente', section: 'Equipo y recursos', kind: 'link' },
     { id: 'academicDocs', icon: '\uD83D\uDCDA', title: 'Documentos academicos', subtitle: 'Explicacion de lo que hacemos en Musicala', section: 'Equipo y recursos', kind: 'link' },
     { id: 'protocols', icon: '\uD83D\uDEE1', title: 'Protocolos', subtitle: 'Documentos y guias operativas', section: 'Equipo y recursos', kind: 'link' }
   ]
