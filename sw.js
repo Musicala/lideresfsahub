@@ -8,7 +8,7 @@
    - Limpieza suave de cachés viejos + mensajería a la UI
 */
 
-const BUILD = "2026-03-05.3";
+const BUILD = "2026-04-27.1";
 const VERSION = `v7-${BUILD}`;
 
 // Nombres sin versión (para no acumular basura)

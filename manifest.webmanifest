@@ -1,7 +1,7 @@
-{
-  "name": "Docentes · Musicala",
-  "short_name": "Docentes Hub",
-  "description": "Hub de accesos para Docentes de Musicala (login con Google). Carnet, jornada, salones, recursos y herramientas.",
+﻿{
+  "name": "Líderes FSA - Musicala",
+  "short_name": "Líderes FSA",
+  "description": "Hub de accesos para Líderes FSA de Musicala (login con Google). Calendario, asistencia, bitácoras, documentos y seguimiento académico.",
   "id": "./",
   "start_url": "./?source=pwa",
   "scope": "./",
@@ -40,30 +40,30 @@
 
   "shortcuts": [
     {
-      "name": "Registro de jornada",
-      "short_name": "Jornada",
-      "description": "Abrir el registro de jornada docente",
+      "name": "Líderes FSA - Musicala",
+      "short_name": "Líderes FSA",
+      "description": "Hub de accesos para Líderes FSA de Musicala (login con Google). Calendario, asistencia, bitácoras, documentos y seguimiento académico.",
       "url": "./?source=shortcut&open=jornada",
       "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Asignación de salones",
-      "short_name": "Salones",
-      "description": "Ver asignación de salones en sede",
+      "name": "Líderes FSA - Musicala",
+      "short_name": "Líderes FSA",
+      "description": "Hub de accesos para Líderes FSA de Musicala (login con Google). Calendario, asistencia, bitácoras, documentos y seguimiento académico.",
       "url": "./?source=shortcut&open=salones",
       "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Formulario observación",
-      "short_name": "Observación",
-      "description": "Abrir formulario de observación docente",
+      "name": "Líderes FSA - Musicala",
+      "short_name": "Líderes FSA",
+      "description": "Hub de accesos para Líderes FSA de Musicala (login con Google). Calendario, asistencia, bitácoras, documentos y seguimiento académico.",
       "url": "./?source=shortcut&open=observacion",
       "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Carnet docente",
-      "short_name": "Carnet",
-      "description": "Abrir carnet docente (si está asignado al usuario)",
+      "name": "Líderes FSA - Musicala",
+      "short_name": "Líderes FSA",
+      "description": "Hub de accesos para Líderes FSA de Musicala (login con Google). Calendario, asistencia, bitácoras, documentos y seguimiento académico.",
       "url": "./?source=shortcut&open=carnet",
       "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }

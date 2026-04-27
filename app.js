@@ -1,6 +1,6 @@
-﻿'use strict';
+﻿﻿'use strict';
 
-const BUILD = '2026-04-18.1';
+const BUILD = '2026-04-27.1';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyCO8QV3OTNLFmaeVjJ7tDDL9vbiEoiIsLk',
@@ -54,7 +54,9 @@ const HUB = {
     { id: 'gallery', icon: '\uD83D\uDDBC', title: 'Galeria de imagenes', subtitle: 'Consulta de evidencias visuales', section: 'Equipo y recursos', kind: 'module' },
     { id: 'team', icon: '\uD83D\uDC69\u200D\uD83C\uDFEB', title: 'Perfil equipo de docentes', subtitle: 'Perfiles del equipo docente', section: 'Equipo y recursos', kind: 'link' },
     { id: 'academicDocs', icon: '\uD83D\uDCDA', title: 'Documentos academicos', subtitle: 'Explicacion de lo que hacemos en Musicala', section: 'Equipo y recursos', kind: 'link' },
-    { id: 'protocols', icon: '\uD83D\uDEE1', title: 'Protocolos', subtitle: 'Documentos y guias operativas', section: 'Equipo y recursos', kind: 'link' }
+    { id: 'protocols', icon: '\uD83D\uDEE1', title: 'Protocolos', subtitle: 'Documentos y guias operativas', section: 'Equipo y recursos', kind: 'link' },
+
+    { id: 'report', icon: '\uD83D\uDCDD', title: 'Resumen informes', subtitle: 'Consolidado mensual y anual', section: 'Administracion', kind: 'module', roles: ['admin'] }
   ]
 };
 
@@ -133,6 +135,8 @@ const STATE = {
     scheduleTeacher: 'all',
     calendarYear: String(new Date().getFullYear()),
     calendarMonth: String(new Date().getMonth() + 1),
+    reportYear: String(new Date().getFullYear()),
+    reportMonth: String(new Date().getMonth() + 1),
     logsArea: 'all',
     logsIndex: 0
   },
@@ -147,7 +151,8 @@ const STATE = {
     gallery: { loaded: false, items: [] },
     diagnostics: { loaded: false, items: [] },
     projects: { loaded: false, items: [] },
-    samples: { loaded: false, items: [] }
+    samples: { loaded: false, items: [] },
+    report: { loaded: false, loading: false, error: '', summary: null }
   },
   settings: {
     scheduleDays: { loaded: false, items: [] },
@@ -840,6 +845,63 @@ function dateInputFromAny(value) {
   return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
 }
 
+function getRecordDateKey(item) {
+  return dateInputFromAny(item?.date || item?.startAt || item?.createdAt || item?.updatedAt || item?.sessionDate || item?.eventDate || '');
+}
+
+function getRecordArea(item) {
+  return normalizeText(item?.area || item?.areaId || item?.primaryAreaId || item?.groupName || item?.studentGroup || item?.sessionName || '');
+}
+
+function monthKeyFromParts(year, month) {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+}
+
+function isRecordInPeriod(item, year, month) {
+  const key = getRecordDateKey(item);
+  if (!key) return false;
+  return key.startsWith(monthKeyFromParts(year, month));
+}
+
+function getMonthName(month) {
+  return CALENDAR_MONTH_LABELS[Math.min(11, Math.max(0, Number(month) - 1))] || 'Mes';
+}
+
+function uniqueText(items = [], limit = 8) {
+  const seen = new Set();
+  return items
+    .map(normalizeText)
+    .filter(Boolean)
+    .filter((item) => {
+      const key = safeLower(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function getAttendancePresentCount(session) {
+  const entries = Array.isArray(session?.entries) ? session.entries : [];
+  if (!entries.length) return 0;
+  return entries.filter((entry) => {
+    const status = safeLower(entry?.status || 'presente');
+    return !['ausente', 'absent', 'no asistio', 'no asistio', 'falta'].includes(status);
+  }).length;
+}
+
+function getItemLinks(item) {
+  const fields = ['url', 'link', 'imageUrl', 'fileUrl', 'photoUrl', 'folderUrl', 'evidenceUrl', 'driveUrl', 'storageUrl', 'attendanceUrl', 'diagnosticUrl'];
+  const links = fields.map((field) => normalizeUrl(item?.[field] || '')).filter(Boolean);
+  if (Array.isArray(item?.links)) {
+    item.links.forEach((link) => links.push(normalizeUrl(typeof link === 'string' ? link : link?.url || '')));
+  }
+  if (Array.isArray(item?.evidenceLinks)) {
+    item.evidenceLinks.forEach((link) => links.push(normalizeUrl(typeof link === 'string' ? link : link?.url || '')));
+  }
+  return uniqueText(links, 20);
+}
+
 function getCalendarYearOptions(items = []) {
   const years = new Set();
   const currentYear = new Date().getFullYear();
@@ -1135,6 +1197,7 @@ function normalizeStudent(doc) {
     fullName: normalizeText(doc.fullName || doc.name || doc.studentName || 'Estudiante'),
     documentNumber: normalizeText(doc.documentNumber || doc.document || ''),
     groupName: normalizeText(doc.groupName || doc.group || ''),
+    area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || doc.groupArea || ''),
     siteName: normalizeText(doc.siteName || doc.centerName || ''),
     guardianName: normalizeText(doc.guardianName || doc.parentName || ''),
     guardianPhone: normalizeText(doc.guardianPhone || doc.parentPhone || ''),
@@ -1149,6 +1212,7 @@ function normalizeAttendance(doc) {
     id: doc.id,
     date: normalizeText(doc.date || ''),
     sessionName: normalizeText(doc.sessionName || doc.title || doc.groupName || 'SesiÃ³n'),
+    area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || doc.groupArea || ''),
     siteName: normalizeText(doc.siteName || doc.centerName || ''),
     notes: normalizeText(doc.notes || ''),
     entries,
@@ -1195,7 +1259,10 @@ function normalizeGallery(doc) {
     id: doc.id,
     title: normalizeText(doc.title || doc.name || 'Imagen'),
     imageUrl: normalizeText(doc.imageUrl || doc.url || doc.src || ''),
-    description: normalizeText(doc.description || doc.notes || '')
+    description: normalizeText(doc.description || doc.notes || ''),
+    date: normalizeText(doc.date || doc.createdAt || doc.updatedAt || ''),
+    area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || ''),
+    url: normalizeText(doc.url || doc.link || doc.imageUrl || '')
   };
 }
 
@@ -1205,7 +1272,16 @@ function normalizeSimpleRecord(doc, fallbackTitle) {
     title: normalizeText(doc.title || doc.name || fallbackTitle),
     subtitle: normalizeText(doc.subtitle || doc.summary || doc.description || ''),
     notes: normalizeText(doc.notes || doc.details || ''),
-    updatedAt: doc.updatedAt || doc.createdAt || null
+    date: normalizeText(doc.date || doc.sessionDate || doc.eventDate || ''),
+    area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || doc.groupName || ''),
+    achievements: normalizeText(doc.achievements || doc.advances || doc.progress || ''),
+    challenges: normalizeText(doc.challenges || doc.retos || doc.difficulties || ''),
+    followUp: normalizeText(doc.followUp || doc.projection || doc.nextSteps || ''),
+    url: normalizeText(doc.url || doc.link || doc.fileUrl || doc.folderUrl || ''),
+    links: Array.isArray(doc.links) ? doc.links : [],
+    evidenceLinks: Array.isArray(doc.evidenceLinks) ? doc.evidenceLinks : [],
+    updatedAt: doc.updatedAt || doc.createdAt || null,
+    createdAt: doc.createdAt || null
   };
 }
 
@@ -1928,6 +2004,329 @@ function renderSimpleCollectionModule(key, title, intro) {
   `;
 }
 
+function getReportPeriod() {
+  const year = Number(STATE.filters.reportYear) || new Date().getFullYear();
+  const month = Math.min(12, Math.max(1, Number(STATE.filters.reportMonth) || (new Date().getMonth() + 1)));
+  return { year, month, label: `${getMonthName(month)} ${year}` };
+}
+
+function areaKey(value) {
+  const text = safeLower(value);
+  if (text.includes('porra')) return 'Porras';
+  if (text.includes('danza')) return 'Danzas';
+  return '';
+}
+
+function getAttendanceStudentKey(entry) {
+  return normalizeText(entry?.studentId || entry?.id || entry?.documentNumber || entry?.document || entry?.name || entry?.fullName || entry?.studentName || '');
+}
+
+function estimateSessionHours(session) {
+  const start = toMillis(session?.startAt || session?.start || session?.startedAt || '');
+  const end = toMillis(session?.endAt || session?.end || session?.endedAt || '');
+  if (start && end && end > start) return (end - start) / 3600000;
+  const duration = Number(session?.durationHours || session?.hours || 0);
+  if (Number.isFinite(duration) && duration > 0) return duration;
+  const minutes = Number(session?.durationMinutes || session?.minutes || 0);
+  if (Number.isFinite(minutes) && minutes > 0) return minutes / 60;
+  return 2;
+}
+
+function isPunctualShift(item) {
+  const status = safeLower(item?.status || '');
+  if (status.includes('tarde') || status.includes('late')) return false;
+  if (status.includes('puntual') || status.includes('on time') || status.includes('open') || status.includes('closed')) return true;
+  return Boolean(item?.checkIn);
+}
+
+function isTeacherChange(item) {
+  const text = safeLower(`${item?.status || ''} ${item?.notes || ''} ${item?.description || ''} ${item?.teacherName || ''}`);
+  return text.includes('cambio') || text.includes('contingencia') || text.includes('reemplazo') || text.includes('suplencia');
+}
+
+function buildReportPrompt(summary) {
+  const areas = summary.areas.map((area) => (
+    `${area.name}: ${area.sessionsDone} sesiones realizadas, ${area.participants} participantes/NNA, ${area.compliance}% de cumplimiento. Avances: ${area.advances.join('; ') || 'sin avances registrados'}. Retos: ${area.challenges.join('; ') || 'sin retos registrados'}. Proyeccion: ${area.projection.join('; ') || 'continuar proceso formativo'}.`
+  )).join('\n');
+
+  return [
+    `Eres un redactor experto de informes de gestion. Redacta un informe mensual para la Fundacion San Antonio - ${getCenterName()} del mes ${summary.periodLabel} con los siguientes datos:`,
+    `Indicadores clave: ${summary.metrics.scheduled} sesiones programadas, ${summary.metrics.done} sesiones realizadas, ${summary.metrics.compliance}% de cumplimiento, ${summary.metrics.children} NNA atendidos, ${summary.metrics.hours} horas realizadas, ${summary.metrics.punctuality}% de puntualidad docente y ${summary.metrics.contingencies} contingencias o cambios de docente.`,
+    `Proceso por areas:\n${areas}`,
+    `Avances generales: ${summary.generalAdvances.join('; ')}.`,
+    `Retos generales: ${summary.generalChallenges.join('; ')}.`,
+    `Novedades relevantes: ${summary.news.join('; ')}.`,
+    `Cumplimiento de horarios y equipo: ${summary.scheduleTeam.join('; ')}.`,
+    `Evidencias disponibles: ${summary.evidence.length ? summary.evidence.map((item) => `${item.label}: ${item.url}`).join('; ') : 'no se encontraron enlaces de evidencia en el periodo'}.`,
+    `Recomendaciones para el siguiente mes: ${summary.recommendations.join('; ')}.`,
+    `Comentarios finales: ${summary.finalComments.join('; ')}.`,
+    'Redacta el informe en un tono formal, claro y estructurado. Incluye introduccion, desarrollo por areas, balance operativo, evidencias, recomendaciones y cierre.'
+  ].join('\n\n');
+}
+
+async function loadReportSummary(force = false) {
+  const bucket = STATE.data.report;
+  const { year, month, label } = getReportPeriod();
+  const cacheKey = `${year}-${month}`;
+  if (!force && bucket.loaded && bucket.summary?.cacheKey === cacheKey) return bucket.summary;
+
+  bucket.loading = true;
+  bucket.error = '';
+  renderWorkspaceModule();
+
+  try {
+    await Promise.all([
+      readCollection('calendar', force),
+      readCollection('attendance', force),
+      readCollection('punctuality', force),
+      readCollection('students', force),
+      readCollection('logs', force),
+      readCollection('diagnostics', force),
+      readCollection('gallery', force),
+      readCollection('samples', force)
+    ]);
+
+    const scheduled = STATE.data.calendar.items.filter((item) => isRecordInPeriod(item, year, month));
+    const attendance = STATE.data.attendance.items.filter((item) => isRecordInPeriod(item, year, month));
+    const shifts = STATE.data.punctuality.items.filter((item) => isRecordInPeriod(item, year, month));
+    const logs = STATE.data.logs.items.filter((item) => isRecordInPeriod(item, year, month));
+    const diagnostics = STATE.data.diagnostics.items.filter((item) => isRecordInPeriod(item, year, month));
+    const galleries = STATE.data.gallery.items.filter((item) => isRecordInPeriod(item, year, month));
+    const samples = STATE.data.samples.items.filter((item) => isRecordInPeriod(item, year, month));
+
+    const childSet = new Set();
+    let participantTouches = 0;
+    attendance.forEach((session) => {
+      participantTouches += getAttendancePresentCount(session);
+      (session.entries || []).forEach((entry) => {
+        const key = getAttendanceStudentKey(entry);
+        if (key) childSet.add(key);
+      });
+    });
+
+    const punctualCount = shifts.filter(isPunctualShift).length;
+    const contingencies = shifts.filter(isTeacherChange).length + attendance.filter((item) => {
+      const text = safeLower(`${item.notes} ${item.status || ''}`);
+      return text.includes('contingencia') || text.includes('cambio docente') || text.includes('reemplazo');
+    }).length;
+
+    const metrics = {
+      scheduled: scheduled.length,
+      done: attendance.length,
+      compliance: scheduled.length ? Math.round((attendance.length / scheduled.length) * 100) : (attendance.length ? 100 : 0),
+      children: childSet.size || participantTouches || STATE.data.students.items.filter((item) => item.active !== false).length,
+      hours: Math.round(attendance.reduce((sum, item) => sum + estimateSessionHours(item), 0) * 10) / 10,
+      punctuality: shifts.length ? Math.round((punctualCount / shifts.length) * 100) : 0,
+      contingencies
+    };
+
+    const areas = ['Porras', 'Danzas'].map((name) => {
+      const areaAttendance = attendance.filter((item) => areaKey(getRecordArea(item)) === name);
+      const areaScheduled = scheduled.filter((item) => areaKey(getRecordArea(item) || item.title) === name);
+      const areaLogs = logs.filter((item) => areaKey(getRecordArea(item)) === name);
+      const areaDiagnostics = diagnostics.filter((item) => areaKey(getRecordArea(item)) === name);
+      const participants = new Set();
+      areaAttendance.forEach((session) => (session.entries || []).forEach((entry) => {
+        const key = getAttendanceStudentKey(entry);
+        if (key) participants.add(key);
+      }));
+      STATE.data.students.items.forEach((student) => {
+        if (areaKey(getRecordArea(student)) === name && student.active !== false) participants.add(student.id || student.fullName);
+      });
+      return {
+        name,
+        sessionsDone: areaAttendance.length,
+        participants: participants.size || areaAttendance.reduce((sum, item) => sum + getAttendancePresentCount(item), 0),
+        compliance: areaScheduled.length ? Math.round((areaAttendance.length / areaScheduled.length) * 100) : (areaAttendance.length ? 100 : 0),
+        advances: uniqueText([...areaLogs.map((item) => item.achievements), ...areaDiagnostics.map((item) => item.achievements || item.subtitle || item.notes)], 6),
+        challenges: uniqueText([...areaLogs.map((item) => item.challenges), ...areaDiagnostics.map((item) => item.challenges)], 6),
+        projection: uniqueText([...areaLogs.map((item) => item.followUp), ...areaDiagnostics.map((item) => item.followUp)], 5)
+      };
+    });
+
+    const evidence = [
+      ...galleries.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Registro fotografico', url }))),
+      ...samples.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Muestra de proceso', url }))),
+      ...diagnostics.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Diagnostico inicial', url }))),
+      ...attendance.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.sessionName || 'Planilla de asistencia', url })))
+    ].slice(0, 16);
+
+    const summary = {
+      cacheKey,
+      periodLabel: label,
+      metrics,
+      areas,
+      generalAdvances: uniqueText([
+        'Ejecucion y seguimiento de las sesiones programadas',
+        diagnostics.length ? 'Consolidacion de diagnosticos iniciales' : '',
+        logs.length ? 'Uso de bitacoras y nueva app para seguimiento academico' : '',
+        metrics.children ? `Alta participacion de ${metrics.children} NNA atendidos` : '',
+        ...logs.map((item) => item.achievements)
+      ], 8),
+      generalChallenges: uniqueText([
+        'Fortalecer concentracion y memoria corporal',
+        'Mejorar coordinacion, precision y limpieza tecnica',
+        'Ajustar intensidad segun energia y disposicion del grupo',
+        ...logs.map((item) => item.challenges)
+      ], 8),
+      news: uniqueText([
+        metrics.contingencies ? `${metrics.contingencies} contingencias o cambios de docente registrados` : '',
+        areas.some((area) => area.participants > 0) ? 'Seguimiento diferenciado por areas de Porras y Danzas' : '',
+        galleries.length || samples.length ? 'Evidencias digitales disponibles para el periodo' : '',
+        diagnostics.length ? 'Activacion o consulta de diagnosticos iniciales' : ''
+      ], 6),
+      scheduleTeam: uniqueText([
+        shifts.length ? `${punctualCount} de ${shifts.length} registros docentes se reportan puntuales` : 'Sin registros de puntualidad docente para el periodo',
+        metrics.punctuality ? `Puntualidad docente estimada: ${metrics.punctuality}%` : '',
+        metrics.contingencies ? 'Se recomienda documentar causas y reemplazos de contingencias' : 'No se evidencian contingencias docentes en los registros consultados'
+      ], 5),
+      evidence,
+      recommendations: [
+        'Mantener grupos por edades y niveles de proceso',
+        'Profundizar fuerza, flexibilidad, coordinacion y memoria corporal',
+        'Seguir usando la app de seguimiento para bitacoras, asistencia y evidencias',
+        'Ajustar cargas e intensidad segun energia del grupo',
+        'Avanzar en montajes coreograficos y preparacion de muestras'
+      ],
+      finalComments: [
+        `El balance de ${label} debe resaltar avances pedagogicos, asistencia y continuidad del proceso.`,
+        'El diagnostico inicial permite orientar decisiones metodologicas y seguimiento individual.',
+        'La motivacion y participacion de los estudiantes son claves para sostener la continuidad docente y formativa.'
+      ]
+    };
+    summary.prompt = buildReportPrompt(summary);
+    bucket.summary = summary;
+    bucket.loaded = true;
+    return summary;
+  } catch (error) {
+    console.error(error);
+    bucket.error = 'No se pudo construir el resumen. Revisa la conexion y permisos de Firestore.';
+    bucket.loaded = true;
+    return null;
+  } finally {
+    bucket.loading = false;
+  }
+}
+
+function renderReportList(title, items) {
+  return `
+    <article class="reportPanel">
+      <h5 class="moduleFormTitle">${escapeHtml(title)}</h5>
+      <ul class="reportList">
+        ${(items && items.length ? items : ['Sin datos registrados para este periodo.']).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+      </ul>
+    </article>
+  `;
+}
+
+function renderReportModule() {
+  if (!isRole('admin')) {
+    return renderEmptyState('Acceso denegado', 'Este resumen esta disponible exclusivamente para usuarios con rol admin.');
+  }
+
+  const bucket = STATE.data.report;
+  const { year, month } = getReportPeriod();
+  const yearOptions = [...new Set([new Date().getFullYear(), year, ...STATE.data.calendar.items.map((item) => item.year).filter(Boolean)])].sort((a, b) => b - a);
+
+  if (bucket.loading) {
+    return `
+      <section class="moduleSurface">
+        <div class="moduleSurfaceHead">
+          <div>
+            <h4 class="moduleTitle">Resumen informes</h4>
+            <p class="moduleIntro">Consultando Firestore y consolidando el periodo seleccionado.</p>
+          </div>
+        </div>
+        ${renderEmptyState('Cargando resumen', 'Estamos reuniendo calendario, asistencia, puntualidad, bitacoras, diagnosticos y evidencias.')}
+      </section>
+    `;
+  }
+
+  const summary = bucket.summary;
+  return `
+    <section class="moduleSurface">
+      <div class="moduleSurfaceHead">
+        <div>
+          <h4 class="moduleTitle">Resumen informes</h4>
+          <p class="moduleIntro">Consolidado mensual y prompt base para informe formal de ${escapeHtml(getCenterName())}.</p>
+        </div>
+      </div>
+      <div class="toolbarRow reportFilters">
+        <label class="field">
+          <span class="fieldLabel">Mes</span>
+          <select class="input" id="report-month-filter">
+            ${CALENDAR_MONTH_LABELS.map((label, index) => `<option value="${index + 1}" ${index + 1 === month ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field">
+          <span class="fieldLabel">Anio</span>
+          <select class="input" id="report-year-filter">
+            ${yearOptions.map((item) => `<option value="${item}" ${item === year ? 'selected' : ''}>${item}</option>`).join('')}
+          </select>
+        </label>
+        <span class="toolbarMeta">${summary ? escapeHtml(summary.periodLabel) : 'Sin consolidar'}</span>
+      </div>
+      ${bucket.error ? renderEmptyState('No se pudo cargar', bucket.error) : ''}
+      ${summary ? `
+        <div class="reportMetricGrid">
+          ${[
+            ['Programadas', summary.metrics.scheduled],
+            ['Realizadas', summary.metrics.done],
+            ['Cumplimiento', `${summary.metrics.compliance}%`],
+            ['NNA atendidos', summary.metrics.children],
+            ['Horas realizadas', summary.metrics.hours],
+            ['Puntualidad', `${summary.metrics.punctuality}%`],
+            ['Contingencias', summary.metrics.contingencies]
+          ].map(([label, value]) => `
+            <article class="heroStat reportMetric">
+              <span class="heroStatLabel">${escapeHtml(label)}</span>
+              <strong class="heroStatValue">${escapeHtml(String(value))}</strong>
+            </article>
+          `).join('')}
+        </div>
+        <div class="reportAreaGrid">
+          ${summary.areas.map((area) => `
+            <article class="recordCard ${area.name === 'Porras' ? 'areaPorras' : 'areaDanzas'}">
+              <div class="recordCardTop">
+                <div>
+                  <div class="recordTitle">${escapeHtml(area.name)}</div>
+                  <div class="recordMeta">${area.sessionsDone} sesiones - ${area.participants} participantes - ${area.compliance}% cumplimiento</div>
+                </div>
+              </div>
+              <div class="recordBody">
+                <strong>Avances:</strong> ${escapeHtml(area.advances.join('; ') || 'Sin avances registrados.')}<br>
+                <strong>Retos:</strong> ${escapeHtml(area.challenges.join('; ') || 'Sin retos registrados.')}<br>
+                <strong>Proyeccion:</strong> ${escapeHtml(area.projection.join('; ') || 'Continuar proceso formativo.')}
+              </div>
+            </article>
+          `).join('')}
+        </div>
+        <div class="reportPanelGrid">
+          ${renderReportList('Avances generales', summary.generalAdvances)}
+          ${renderReportList('Retos generales', summary.generalChallenges)}
+          ${renderReportList('Novedades relevantes', summary.news)}
+          ${renderReportList('Cumplimiento de horarios y equipo', summary.scheduleTeam)}
+          ${renderReportList('Recomendaciones', summary.recommendations)}
+          ${renderReportList('Comentarios finales', summary.finalComments)}
+        </div>
+        <article class="reportPanel">
+          <h5 class="moduleFormTitle">Evidencias</h5>
+          <div class="recordActions">
+            ${summary.evidence.length ? summary.evidence.map((item) => `<a class="btnGhost" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`).join('') : '<span class="recordMeta">No se encontraron enlaces de evidencia para este periodo.</span>'}
+          </div>
+        </article>
+        <article class="reportPanel">
+          <div class="toolbarRow" style="justify-content:space-between;">
+            <h5 class="moduleFormTitle" style="margin:0;">Prompt de informe</h5>
+            <button class="btnPrimary" type="button" id="report-copy-prompt">Copiar prompt</button>
+          </div>
+          <textarea class="input reportPrompt" id="report-prompt" readonly>${escapeHtml(summary.prompt)}</textarea>
+        </article>
+      ` : renderEmptyState('Sin resumen', 'Selecciona un periodo o actualiza para generar el consolidado.')}
+    </section>
+  `;
+}
+
 const MODULE_CONFIG = {
   calendar: {
     eyebrow: 'Planeacion',
@@ -1994,6 +2393,12 @@ const MODULE_CONFIG = {
     title: 'Muestras de proceso',
     subtitle: 'Consulta de muestras y preparacion.',
     render: () => renderSimpleCollectionModule('samples', 'Muestras de proceso', 'Seguimiento de muestras y evidencias.')
+  },
+  report: {
+    eyebrow: 'Administracion',
+    title: 'Resumen informes',
+    subtitle: 'Consolidado mensual y anual para informes.',
+    render: renderReportModule
   }
 };
 
@@ -2021,6 +2426,13 @@ async function openWorkspaceModule(moduleId) {
     return;
   }
 
+  const button = HUB.buttons.find((item) => item.id === moduleId);
+  if (button && !canViewButton(button)) {
+    STATE.currentModule = '';
+    toast('Acceso denegado.');
+    return;
+  }
+
   STATE.currentModule = moduleId;
   STATE.filters.search = '';
   STATE.filters.attendanceStatus = 'all';
@@ -2035,6 +2447,15 @@ async function openWorkspaceModule(moduleId) {
     await readCollection('team', true);
     await readSchedulePlaceOptions(true);
     await readScheduleAreaOptions(true);
+  }
+
+  if (moduleId === 'report') {
+    renderWorkspaceModule();
+    openModal('modal-workspace');
+    await loadReportSummary(true);
+    renderWorkspaceModule();
+    setBottomNavActive('home');
+    return;
   }
 
   await readCollection(moduleId);
@@ -2052,6 +2473,13 @@ async function refreshActiveModule() {
   if (STATE.currentModule === 'schedule') {
     await readSchedulePlaceOptions(true);
     await readScheduleAreaOptions(true);
+  }
+  if (STATE.currentModule === 'report') {
+    await loadReportSummary(true);
+    renderWorkspaceModule();
+    renderButtons();
+    updateHeroSummary();
+    return;
   }
   await readCollection(STATE.currentModule, true);
   renderWorkspaceModule();
@@ -2212,10 +2640,38 @@ function bindWorkspaceModal() {
       STATE.filters.logsArea = target.value || 'all';
       STATE.filters.logsIndex = 0;
       renderWorkspaceModule();
+      return;
+    }
+
+    if (target.id === 'report-month-filter') {
+      STATE.filters.reportMonth = target.value || String(new Date().getMonth() + 1);
+      loadReportSummary(true).then(() => renderWorkspaceModule());
+      return;
+    }
+
+    if (target.id === 'report-year-filter') {
+      STATE.filters.reportYear = target.value || String(new Date().getFullYear());
+      loadReportSummary(true).then(() => renderWorkspaceModule());
     }
   });
 
   $('#workspace-content')?.addEventListener('click', async (event) => {
+    if (event.target.id === 'report-copy-prompt') {
+      const prompt = $('#report-prompt')?.value || STATE.data.report.summary?.prompt || '';
+      if (!prompt) {
+        toast('No hay prompt para copiar.');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(prompt);
+        toast('Prompt copiado.');
+      } catch (error) {
+        console.error(error);
+        toast('No se pudo copiar el prompt.');
+      }
+      return;
+    }
+
     if (event.target.id === 'schedule-places-toggle') {
       scheduleEditorState.placeListEditing = !scheduleEditorState.placeListEditing;
       scheduleEditorState.placeDraft = [...getSchedulePlaceOptions()];
@@ -2877,5 +3333,3 @@ document.addEventListener('DOMContentLoaded', () => {
   setNetPill();
   mount();
 });
-
-

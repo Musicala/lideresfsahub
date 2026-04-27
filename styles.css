@@ -1198,6 +1198,52 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   border-color:rgba(31,122,107,.25);
   background:linear-gradient(160deg, rgba(31,122,107,.08), rgba(255,252,246,.84));
 }
+
+.reportFilters{
+  margin-bottom:14px;
+}
+.reportMetricGrid,
+.reportAreaGrid,
+.reportPanelGrid{
+  display:grid;
+  gap:12px;
+  margin-top:12px;
+}
+.reportMetricGrid{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+.reportMetric{
+  min-height:92px;
+}
+.reportAreaGrid{
+  grid-template-columns:1fr;
+}
+.reportPanelGrid{
+  grid-template-columns:1fr;
+}
+.reportPanel{
+  margin-top:12px;
+  padding:16px;
+  border-radius:18px;
+  border:1px solid var(--line);
+  background:rgba(255,252,246,.72);
+  box-shadow:var(--shadow-xs);
+}
+.reportList{
+  margin:0;
+  padding-left:18px;
+  display:grid;
+  gap:8px;
+  color:rgba(16,34,58,.78);
+  font-size:13px;
+  line-height:1.45;
+}
+.reportPrompt{
+  margin-top:12px;
+  min-height:280px;
+  resize:vertical;
+  line-height:1.5;
+}
 .dangerBtn{
   color:var(--danger);
   border-color:rgba(185,77,43,.26);
@@ -1792,6 +1838,13 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
 @media (min-width: 1120px){
   .grid{
     grid-template-columns:repeat(3, minmax(0, 1fr));
+  }
+  .reportMetricGrid{
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+  }
+  .reportAreaGrid,
+  .reportPanelGrid{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
   }
 }
 
