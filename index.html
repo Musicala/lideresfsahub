@@ -374,14 +374,6 @@
                 </span>
               </button>
 
-              <button class="drawerItem" type="button" data-action="switchHub" aria-label="Cambiar panel">
-                <span class="diIco" aria-hidden="true">🧭</span>
-                <span class="diTxt">
-                  <span class="diTitle">Cambiar panel</span>
-                  <span class="diSub">Ir a otros espacios de trabajo</span>
-                </span>
-              </button>
-
               <button class="drawerItem" type="button" data-action="support" aria-label="Soporte">
                 <span class="diIco" aria-hidden="true">🛟</span>
                 <span class="diTxt">
@@ -493,6 +485,78 @@
                 <div class="muted">AÃºn no tienes favoritos â­</div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- ===== MODAL: SUPPORT ===== -->
+        <section
+          id="modal-support"
+          class="modal modalWide"
+          hidden
+          role="dialog"
+          aria-modal="true"
+          aria-label="Soporte"
+        >
+          <div class="modalCard workspaceModalCard">
+            <div class="modalHead workspaceHead">
+              <div class="workspaceTitleWrap">
+                <div class="modalEyebrow">Soporte</div>
+                <div class="modalTitle">Reportar problema o ajuste</div>
+                <p class="workspaceSub">El reporte queda guardado para revision del equipo administrador.</p>
+              </div>
+              <button class="btnGhost" id="btn-support-close" type="button" aria-label="Cerrar soporte" title="Cerrar">&#10005;</button>
+            </div>
+
+            <form class="modalBody supportForm" id="support-form">
+              <label class="field fieldSpan2">
+                <span class="fieldLabel">Titulo</span>
+                <input class="input" type="text" id="support-title-input" required maxlength="120" placeholder="Resumen breve del problema o ajuste" />
+              </label>
+              <label class="field">
+                <span class="fieldLabel">Categoria</span>
+                <select class="input" id="support-category" required>
+                  <option value="Error">Error</option>
+                  <option value="Ajuste">Ajuste</option>
+                  <option value="Datos">Datos</option>
+                  <option value="Permisos">Permisos</option>
+                  <option value="Diseno">Diseno</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="fieldLabel">Prioridad</span>
+                <select class="input" id="support-priority" required>
+                  <option value="Baja">Baja</option>
+                  <option value="Media" selected>Media</option>
+                  <option value="Alta">Alta</option>
+                </select>
+              </label>
+              <label class="field fieldSpan2">
+                <span class="fieldLabel">Modulo relacionado</span>
+                <select class="input" id="support-module" required>
+                  <option value="calendar">Calendario</option>
+                  <option value="schedule">Horario docentes</option>
+                  <option value="punctuality">Puntualidad</option>
+                  <option value="attendance">Asistencia</option>
+                  <option value="students">Estudiantes</option>
+                  <option value="logs">Bitacoras</option>
+                  <option value="diagnostics">Diagnosticos</option>
+                  <option value="projects">Proyectos</option>
+                  <option value="samples">Muestras de proceso</option>
+                  <option value="monthlyReports">Informes mensuales</option>
+                  <option value="report">Resumen informes</option>
+                  <option value="other">Otro</option>
+                </select>
+              </label>
+              <label class="field fieldSpan2">
+                <span class="fieldLabel">Descripcion detallada</span>
+                <textarea class="input textarea" id="support-description" required rows="6" maxlength="2000" placeholder="Cuenta que paso, donde lo viste y que esperabas que ocurriera."></textarea>
+              </label>
+              <div class="modalActions fieldSpan2">
+                <button class="btnGhost" id="btn-support-cancel" type="button">Cancelar</button>
+                <button class="btnPrimary" id="support-submit" type="submit">Guardar reporte</button>
+              </div>
+            </form>
           </div>
         </section>
 

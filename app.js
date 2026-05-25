@@ -1,6 +1,7 @@
 ﻿﻿'use strict';
 
-const BUILD = '2026-04-27.1';
+const BUILD = '2026-05-25.1';
+const PUNCTUALITY_TOLERANCE_MINUTES = 5;
 
 const firebaseConfig = {
   apiKey: 'AIzaSyCO8QV3OTNLFmaeVjJ7tDDL9vbiEoiIsLk',
@@ -36,7 +37,6 @@ const HUB = {
     academicDocs: 'https://musicala.github.io/explicacionartes/',
     protocols: '',
     annualSchedule: '',
-    supportMail: 'mailto:alekcaballeromusic@gmail.com?subject=Soporte%20HUB%20Lideres%20FSA',
     team: 'https://musicala.github.io/perfilesmusicala//'
   },
   buttons: [
@@ -50,13 +50,15 @@ const HUB = {
     { id: 'diagnostics', icon: '\uD83E\uDDEA', title: 'Diagnosticos', subtitle: 'Seguimiento diagnostico y observaciones', section: 'Seguimiento academico', kind: 'module' },
     { id: 'projects', icon: '\uD83E\uDDE9', title: 'Proyectos', subtitle: 'Planeaciones y proyectos activos', section: 'Seguimiento academico', kind: 'module' },
     { id: 'samples', icon: '\uD83C\uDFAD', title: 'Muestras de proceso', subtitle: 'Evidencias y preparacion', section: 'Seguimiento academico', kind: 'module' },
+    { id: 'monthlyReports', icon: '\uD83D\uDCC4', title: 'Informes mensuales', subtitle: 'Registros mensuales diligenciados por docentes', section: 'Seguimiento academico', kind: 'module', roles: ['admin', 'leader'] },
 
     { id: 'gallery', icon: '\uD83D\uDDBC', title: 'Galeria de imagenes', subtitle: 'Consulta de evidencias visuales', section: 'Equipo y recursos', kind: 'module' },
     { id: 'team', icon: '\uD83D\uDC69\u200D\uD83C\uDFEB', title: 'Perfil equipo de docentes', subtitle: 'Perfiles del equipo docente', section: 'Equipo y recursos', kind: 'link' },
     { id: 'academicDocs', icon: '\uD83D\uDCDA', title: 'Documentos academicos', subtitle: 'Explicacion de lo que hacemos en Musicala', section: 'Equipo y recursos', kind: 'link' },
     { id: 'protocols', icon: '\uD83D\uDEE1', title: 'Protocolos', subtitle: 'Documentos y guias operativas', section: 'Equipo y recursos', kind: 'link' },
 
-    { id: 'report', icon: '\uD83D\uDCDD', title: 'Resumen informes', subtitle: 'Consolidado mensual y anual', section: 'Administracion', kind: 'module', roles: ['admin'] }
+    { id: 'report', icon: '\uD83D\uDCDD', title: 'Resumen informes', subtitle: 'Consolidado mensual y anual', section: 'Administracion', kind: 'module', roles: ['admin'] },
+    { id: 'supportAdmin', icon: '\uD83D\uDEE0\uFE0F', title: 'Soporte', subtitle: 'Reportes enviados por el equipo', section: 'Administracion', kind: 'module', roles: ['admin'] }
   ]
 };
 
@@ -72,11 +74,13 @@ const COLLECTIONS = {
   gallery: 'galleryImages',
   diagnostics: 'diagnostics',
   projects: 'projects',
-  samples: 'processSamples'
+  samples: 'processSamples',
+  monthlyReports: 'monthlyReports',
+  supportTickets: 'supportTickets'
 };
 
 const CORE_BUTTON_IDS = ['schedule', 'students', 'attendance', 'logs'];
-const MODAL_IDS = ['modal-search', 'modal-favorites', 'modal-workspace'];
+const MODAL_IDS = ['modal-search', 'modal-favorites', 'modal-workspace', 'modal-support'];
 const LOCAL_KEYS = {
   recent: 'musicala_lideres_recent',
   favorites: 'musicala_lideres_favorites'
@@ -137,6 +141,7 @@ const STATE = {
     calendarMonth: String(new Date().getMonth() + 1),
     reportYear: String(new Date().getFullYear()),
     reportMonth: String(new Date().getMonth() + 1),
+    supportStatus: 'all',
     logsArea: 'all',
     logsIndex: 0
   },
@@ -152,6 +157,8 @@ const STATE = {
     diagnostics: { loaded: false, items: [] },
     projects: { loaded: false, items: [] },
     samples: { loaded: false, items: [] },
+    monthlyReports: { loaded: false, items: [] },
+    supportAdmin: { loaded: false, items: [] },
     report: { loaded: false, loading: false, error: '', summary: null }
   },
   settings: {
@@ -241,6 +248,30 @@ function normalizeDayLabel(value) {
 
 function safeLower(value) {
   return normalizeText(value).toLowerCase();
+}
+
+function comparableText(value) {
+  return safeLower(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function statusKey(value) {
+  const text = comparableText(value);
+  if (!text) return 'presente';
+  if (['presente', 'present', 'asistio', 'asiste', 'si'].includes(text)) return 'presente';
+  if (['ausente', 'absent', 'no asistio', 'falta', 'no'].includes(text)) return 'ausente';
+  if (['tarde', 'late', 'tardanza', 'retardo'].includes(text)) return 'tarde';
+  if (['excusado', 'excusa', 'justificado', 'excused'].includes(text)) return 'excusado';
+  return 'otro';
+}
+
+function statusLabel(key) {
+  return {
+    presente: 'Presente',
+    ausente: 'Ausente',
+    tarde: 'Tarde',
+    excusado: 'Excusado',
+    otro: 'Otro'
+  }[key] || 'Otro';
 }
 
 function slugify(value) {
@@ -465,6 +496,54 @@ function closeAllModals() {
   });
   if (!isDrawerOpen()) {
     document.body.style.overflow = '';
+  }
+}
+
+function openSupportModal() {
+  if (!CURRENT_USER) {
+    toast('Debes iniciar sesion para enviar soporte.');
+    return;
+  }
+  const form = $('#support-form');
+  form?.reset();
+  const moduleSelect = $('#support-module');
+  if (moduleSelect && STATE.currentModule) moduleSelect.value = STATE.currentModule;
+  openModal('modal-support');
+}
+
+async function submitSupportTicket(event) {
+  event?.preventDefault();
+  if (!CURRENT_USER || !DB) return;
+  const submit = $('#support-submit');
+  submit.disabled = true;
+  submit.textContent = 'Guardando...';
+  try {
+    await addDoc(collection(DB, COLLECTIONS.supportTickets), {
+      title: normalizeText($('#support-title-input')?.value),
+      category: normalizeText($('#support-category')?.value),
+      priority: normalizeText($('#support-priority')?.value),
+      moduleId: normalizeText($('#support-module')?.value),
+      description: normalizeText($('#support-description')?.value),
+      status: 'open',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdByUid: CURRENT_USER.uid,
+      createdByEmail: ACTIVE_EMAIL,
+      createdByName: CURRENT_USER.displayName || ACTIVE_PROFILE?.label || ACTIVE_EMAIL,
+      userRole: currentRole(),
+      centerName: getCenterName(),
+      build: BUILD,
+      userAgent: navigator.userAgent || ''
+    });
+    toast('Reporte de soporte guardado.');
+    closeModal('modal-support');
+    $('#support-form')?.reset();
+  } catch (error) {
+    console.error(error);
+    toast('No se pudo guardar el reporte de soporte.');
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Guardar reporte';
   }
 }
 
@@ -840,13 +919,24 @@ function normalizeCalendar(doc) {
 function dateInputFromAny(value) {
   const text = normalizeText(value);
   if (!text) return '';
+  if (/^\d{4}-\d{2}$/.test(text)) return `${text}-01`;
   const date = new Date(text);
   if (!Number.isFinite(date.getTime())) return '';
   return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
 }
 
 function getRecordDateKey(item) {
-  return dateInputFromAny(item?.date || item?.startAt || item?.createdAt || item?.updatedAt || item?.sessionDate || item?.eventDate || '');
+  const periodKey = normalizeText(item?.periodKey || item?.period || '');
+  if (/^\d{4}-\d{1,2}$/.test(periodKey)) {
+    const [year, month] = periodKey.split('-');
+    return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-01`;
+  }
+  const month = Number(item?.month);
+  const year = Number(item?.year);
+  if (Number.isFinite(year) && Number.isFinite(month) && year > 1900 && month >= 1 && month <= 12) {
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`;
+  }
+  return dateInputFromAny(item?.date || item?.startAt || item?.createdAt || item?.updatedAt || item?.sessionDate || item?.eventDate || item?.period || '');
 }
 
 function getRecordArea(item) {
@@ -885,9 +975,59 @@ function getAttendancePresentCount(session) {
   const entries = Array.isArray(session?.entries) ? session.entries : [];
   if (!entries.length) return 0;
   return entries.filter((entry) => {
-    const status = safeLower(entry?.status || 'presente');
-    return !['ausente', 'absent', 'no asistio', 'no asistio', 'falta'].includes(status);
+    const status = statusKey(entry?.status || 'presente');
+    return !['ausente'].includes(status);
   }).length;
+}
+
+function getAttendanceSessionStats(session) {
+  const entries = Array.isArray(session?.entries) ? session.entries : [];
+  const summary = { total: entries.length, presente: 0, ausente: 0, tarde: 0, excusado: 0, otro: 0 };
+  entries.forEach((entry) => {
+    const key = statusKey(entry?.status || '');
+    summary[key] = (summary[key] || 0) + 1;
+  });
+  const attended = summary.presente + summary.tarde + summary.excusado;
+  summary.percent = summary.total ? Math.round((attended / summary.total) * 100) : 0;
+  return summary;
+}
+
+function getAttendanceStats(sessions = []) {
+  const totals = { sessions: sessions.length, total: 0, unique: 0, presente: 0, ausente: 0, tarde: 0, excusado: 0, percent: 0, avgSession: 0, areas: [] };
+  const unique = new Set();
+  const areaMap = new Map();
+  sessions.forEach((session) => {
+    const stats = getAttendanceSessionStats(session);
+    totals.total += stats.total;
+    totals.presente += stats.presente;
+    totals.ausente += stats.ausente;
+    totals.tarde += stats.tarde;
+    totals.excusado += stats.excusado;
+    const area = normalizeText(session.area || 'Otra area') || 'Otra area';
+    if (!areaMap.has(area)) areaMap.set(area, { area, sessions: 0, presentLike: 0, total: 0, participants: new Set() });
+    const areaStats = areaMap.get(area);
+    areaStats.sessions += 1;
+    areaStats.total += stats.total;
+    areaStats.presentLike += stats.presente + stats.tarde + stats.excusado;
+    (session.entries || []).forEach((entry) => {
+      const key = getAttendanceStudentKey(entry);
+      if (key) {
+        unique.add(key);
+        areaStats.participants.add(key);
+      }
+    });
+  });
+  const presentLike = totals.presente + totals.tarde + totals.excusado;
+  totals.unique = unique.size;
+  totals.percent = totals.total ? Math.round((presentLike / totals.total) * 100) : 0;
+  totals.avgSession = sessions.length ? Math.round((presentLike / sessions.length) * 10) / 10 : 0;
+  totals.areas = [...areaMap.values()].map((item) => ({
+    area: item.area,
+    sessions: item.sessions,
+    participants: item.participants.size,
+    percent: item.total ? Math.round((item.presentLike / item.total) * 100) : 0
+  })).sort((a, b) => a.area.localeCompare(b.area, 'es'));
+  return totals;
 }
 
 function getItemLinks(item) {
@@ -1184,6 +1324,8 @@ function normalizePunctuality(doc) {
   return {
     id: doc.id,
     teacherName: normalizeText(doc.teacherName || doc.label || doc.displayName || 'Docente'),
+    teacherId: normalizeText(doc.teacherId || doc.uid || ''),
+    teacherEmail: normalizeText(doc.teacherEmail || doc.email || ''),
     date: normalizeText(doc.date || ''),
     checkIn,
     checkOut,
@@ -1207,17 +1349,32 @@ function normalizeStudent(doc) {
 }
 
 function normalizeAttendance(doc) {
-  const entries = Array.isArray(doc.entries) ? doc.entries : Array.isArray(doc.students) ? doc.students : [];
+  const rawEntries = Array.isArray(doc.entries) ? doc.entries
+    : Array.isArray(doc.students) ? doc.students
+      : Array.isArray(doc.attendance) ? doc.attendance
+        : Array.isArray(doc.records) ? doc.records
+          : [];
+  const entries = rawEntries.map((entry, index) => {
+    const name = normalizeText(entry?.studentName || entry?.fullName || entry?.name || entry?.student || entry?.nombre || `Estudiante ${index + 1}`);
+    const status = statusKey(entry?.status || entry?.estado || entry?.attendanceStatus || entry?.state || '');
+    return {
+      ...entry,
+      studentName: name,
+      status,
+      statusLabel: statusLabel(status),
+      notes: normalizeText(entry?.notes || entry?.observations || entry?.observaciones || entry?.comment || '')
+    };
+  });
   return {
     id: doc.id,
-    date: normalizeText(doc.date || ''),
+    date: normalizeText(doc.date || doc.sessionDate || doc.createdAt || ''),
     sessionName: normalizeText(doc.sessionName || doc.title || doc.groupName || 'SesiÃ³n'),
     area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || doc.groupArea || ''),
     siteName: normalizeText(doc.siteName || doc.centerName || ''),
     notes: normalizeText(doc.notes || ''),
     entries,
     statusSummary: entries.reduce((acc, item) => {
-      const key = safeLower(item?.status || 'presente') || 'presente';
+      const key = statusKey(item?.status || 'presente');
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {})
@@ -1285,6 +1442,57 @@ function normalizeSimpleRecord(doc, fallbackTitle) {
   };
 }
 
+function normalizeMonthlyReport(doc) {
+  const month = Number(doc.month) || Number(String(doc.periodKey || doc.period || '').split('-')[1]) || 0;
+  const year = Number(doc.year) || Number(String(doc.periodKey || doc.period || '').split('-')[0]) || 0;
+  const periodKey = normalizeText(doc.periodKey || doc.period || (year && month ? monthKeyFromParts(year, month) : ''));
+  const evidenceLinks = Array.isArray(doc.evidenceLinks) ? doc.evidenceLinks : (Array.isArray(doc.links) ? doc.links : []);
+  return {
+    id: doc.id,
+    title: normalizeText(doc.title || 'Informe mensual'),
+    teacherName: normalizeText(doc.teacherName || doc.teacherLabel || doc.name || 'Docente'),
+    teacherEmail: normalizeText(doc.teacherEmail || doc.email || ''),
+    area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || ''),
+    month,
+    year,
+    periodKey,
+    date: normalizeText(doc.date || doc.createdAt || ''),
+    updatedAt: doc.updatedAt || doc.createdAt || null,
+    createdAt: doc.createdAt || null,
+    achievements: normalizeText(doc.achievements || doc.advances || doc.avances || ''),
+    challenges: normalizeText(doc.challenges || doc.retos || doc.difficulties || ''),
+    projection: normalizeText(doc.projection || doc.proyeccion || ''),
+    recommendations: normalizeText(doc.recommendations || doc.recomendaciones || ''),
+    comments: normalizeText(doc.comments || doc.observations || ''),
+    evidenceLinks,
+    links: Array.isArray(doc.links) ? doc.links : [],
+    participants: Array.isArray(doc.participants) ? doc.participants : (Array.isArray(doc.students) ? doc.students : [])
+  };
+}
+
+function normalizeSupportTicket(doc) {
+  return {
+    id: doc.id,
+    title: normalizeText(doc.title || 'Reporte de soporte'),
+    category: normalizeText(doc.category || 'Otro'),
+    priority: normalizeText(doc.priority || 'Media'),
+    moduleId: normalizeText(doc.moduleId || 'other'),
+    description: normalizeText(doc.description || ''),
+    status: normalizeText(doc.status || 'open'),
+    adminNotes: normalizeText(doc.adminNotes || ''),
+    createdAt: doc.createdAt || null,
+    updatedAt: doc.updatedAt || null,
+    resolvedAt: doc.resolvedAt || null,
+    resolvedByEmail: normalizeText(doc.resolvedByEmail || ''),
+    createdByUid: normalizeText(doc.createdByUid || ''),
+    createdByEmail: normalizeText(doc.createdByEmail || ''),
+    createdByName: normalizeText(doc.createdByName || 'Usuario'),
+    userRole: normalizeText(doc.userRole || ''),
+    centerName: normalizeText(doc.centerName || ''),
+    build: normalizeText(doc.build || '')
+  };
+}
+
 const COLLECTION_META = {
   calendar: { name: COLLECTIONS.calendar, normalize: normalizeCalendar },
   schedule: { name: COLLECTIONS.schedules, normalize: normalizeSchedule },
@@ -1296,7 +1504,9 @@ const COLLECTION_META = {
   gallery: { name: COLLECTIONS.gallery, normalize: normalizeGallery },
   diagnostics: { name: COLLECTIONS.diagnostics, normalize: (doc) => normalizeSimpleRecord(doc, 'DiagnÃ³stico') },
   projects: { name: COLLECTIONS.projects, normalize: (doc) => normalizeSimpleRecord(doc, 'Proyecto') },
-  samples: { name: COLLECTIONS.samples, normalize: (doc) => normalizeSimpleRecord(doc, 'Muestra de proceso') }
+  samples: { name: COLLECTIONS.samples, normalize: (doc) => normalizeSimpleRecord(doc, 'Muestra de proceso') },
+  monthlyReports: { name: COLLECTIONS.monthlyReports, normalize: normalizeMonthlyReport },
+  supportAdmin: { name: COLLECTIONS.supportTickets, normalize: normalizeSupportTicket }
 };
 
 async function readCollection(key, force = false) {
@@ -1684,29 +1894,61 @@ function renderPunctualityModule() {
   if (!items.length) {
     return renderEmptyState('Sin registros de puntualidad', 'Cuando los docentes marquen entrada y salida, aquÃ­ podrÃ¡s revisar la puntualidad.');
   }
+  const schedules = STATE.data.schedule.items;
+  const stats = getPunctualityStats(items, schedules);
 
   return `
     <section class="moduleSurface">
       <div class="moduleSurfaceHead">
         <div>
           <h4 class="moduleTitle">Registro de puntualidad</h4>
-          <p class="moduleIntro">Lectura de ingresos y salidas del equipo docente.</p>
+          <p class="moduleIntro">Lectura de ingresos y salidas comparada contra el horario docente. Tolerancia: ${PUNCTUALITY_TOLERANCE_MINUTES} minutos.</p>
         </div>
       </div>
+      ${!schedules.length ? renderEmptyState('No hay horarios docentes cargados para comparar puntualidad', 'Carga leaderSchedules para que el sistema pueda medir puntualidad contra el horario programado.') : ''}
+      ${stats.noSchedule ? `<div class="inlineAlert">${stats.noSchedule} registros sin horario asociado. Revisa email, uid o nombre del docente.</div>` : ''}
+      <div class="statGrid">
+        ${[
+          ['Registros totales', stats.total],
+          ['Con horario asociado', stats.withSchedule],
+          ['Puntuales', stats.onTime],
+          ['Tardes', stats.late],
+          ['Sin horario asociado', stats.noSchedule],
+          ['Sin salida', stats.open],
+          ['Puntualidad', `${stats.percent}%`],
+          ['Promedio minutos tarde', stats.avgLate],
+          ['Mayor retraso', `${stats.maxLate} min`]
+        ].map(([label, value]) => `<article class="statCard"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
+      </div>
+      <div class="teacherStatsGrid">
+        ${stats.teachers.map((teacher) => `
+          <article class="teacherStatCard">
+            <strong>${escapeHtml(teacher.teacherName)}</strong>
+            <span>Total: ${teacher.total}</span>
+            <span>Puntuales: ${teacher.onTime}</span>
+            <span>Tardes: ${teacher.late}</span>
+            <span>${teacher.percent}% puntualidad</span>
+            <span>Promedio retraso: ${teacher.avgLate} min</span>
+            <small>Ultimo registro: ${escapeHtml(formatDate(teacher.last, { withTime: true }))}</small>
+          </article>
+        `).join('')}
+      </div>
       <div class="recordList">
-        ${items.map((item) => `
+        ${stats.classified.map((item) => `
           <article class="recordCard">
             <div class="recordCardTop">
               <div>
                 <div class="recordTitle">${escapeHtml(item.teacherName)}</div>
                 <div class="recordMeta">${escapeHtml(item.date || '')}</div>
               </div>
-              <span class="statusPill ${item.status === 'closed' ? 'statusOk' : ''}">${escapeHtml(item.status === 'closed' ? 'Cerrada' : 'Abierta')}</span>
+              <span class="statusPill punctuality-${escapeHtml(item.punctuality.type)}">${escapeHtml(item.punctuality.label)}</span>
             </div>
             <div class="recordBody">
               ${escapeHtml([
+                item.punctuality.schedule ? `Horario: ${item.punctuality.schedule.startTime} - ${item.punctuality.schedule.endTime}` : 'Horario: sin horario asociado',
                 item.checkIn ? `Entrada: ${formatDate(item.checkIn, { withTime: true })}` : '',
-                item.checkOut ? `Salida: ${formatDate(item.checkOut, { withTime: true })}` : 'Sin salida registrada'
+                item.checkOut ? `Salida: ${formatDate(item.checkOut, { withTime: true })}` : 'Sin salida registrada',
+                Number.isFinite(item.punctuality.diff) ? `Diferencia: ${item.punctuality.diff > 0 ? '+' : ''}${item.punctuality.diff} min` : ''
               ].filter(Boolean).join(' Â· '))}
             </div>
           </article>
@@ -1769,8 +2011,14 @@ function renderAttendanceModule() {
   const filter = safeLower(STATE.filters.attendanceStatus);
   const items = STATE.data.attendance.items.filter((item) => {
     if (filter === 'all') return true;
+    const stats = getAttendanceSessionStats(item);
+    if (filter === 'withabsent') return stats.ausente > 0;
+    if (filter === 'withoutabsent') return stats.total > 0 && stats.ausente === 0;
+    if (filter === 'withlate') return stats.tarde > 0;
+    if (filter === 'withexcused') return stats.excusado > 0;
     return (item.statusSummary?.[filter] || 0) > 0;
   });
+  const allStats = getAttendanceStats(STATE.data.attendance.items);
 
   return `
     <section class="moduleSurface">
@@ -1781,23 +2029,53 @@ function renderAttendanceModule() {
         </div>
       </div>
 
+      <div class="statGrid">
+        ${[
+          ['Sesiones registradas', allStats.sessions],
+          ['Total de registros', allStats.total],
+          ['NNA unicos', allStats.unique],
+          ['Presentes', allStats.presente],
+          ['Ausentes', allStats.ausente],
+          ['Tardes', allStats.tarde],
+          ['Excusados', allStats.excusado],
+          ['Asistencia general', `${allStats.percent}%`],
+          ['Promedio por sesion', allStats.avgSession]
+        ].map(([label, value]) => `<article class="statCard"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
+      </div>
+
+      ${allStats.areas.length ? `
+        <div class="areaStatsGrid">
+          ${allStats.areas.map((area) => `
+            <article class="areaStatCard">
+              <strong>${escapeHtml(area.area)}</strong>
+              <span>${area.sessions} sesiones</span>
+              <span>${area.participants} participantes unicos</span>
+              <span>${area.percent}% asistencia</span>
+            </article>
+          `).join('')}
+        </div>
+      ` : ''}
+
       <div class="toolbarRow">
         <label class="field">
           <span class="fieldLabel">Filtrar por estado</span>
           <select class="input" id="attendance-status-filter">
             <option value="all"${filter === 'all' ? ' selected' : ''}>Todos</option>
-            <option value="presente"${filter === 'presente' ? ' selected' : ''}>Presente</option>
-            <option value="ausente"${filter === 'ausente' ? ' selected' : ''}>Ausente</option>
-            <option value="tarde"${filter === 'tarde' ? ' selected' : ''}>Tarde</option>
-            <option value="excusado"${filter === 'excusado' ? ' selected' : ''}>Excusado</option>
+            <option value="withAbsent"${filter === 'withabsent' ? ' selected' : ''}>Con ausentes</option>
+            <option value="withoutAbsent"${filter === 'withoutabsent' ? ' selected' : ''}>Sin ausentes</option>
+            <option value="withLate"${filter === 'withlate' ? ' selected' : ''}>Con tardanzas</option>
+            <option value="withExcused"${filter === 'withexcused' ? ' selected' : ''}>Con excusados</option>
           </select>
         </label>
         <div class="toolbarMeta">${items.length} sesiones</div>
       </div>
 
       <div class="recordList">
-        ${items.length ? items.map((item) => `
-          <article class="recordCard">
+        ${items.length ? items.map((item) => {
+          const stats = getAttendanceSessionStats(item);
+          return `
+          <details class="recordCard attendanceDetailCard">
+            <summary class="attendanceSummary">
             <div class="recordCardTop">
               <div>
                 <div class="recordTitle">${escapeHtml(item.sessionName)}</div>
@@ -1814,8 +2092,33 @@ function renderAttendanceModule() {
               ].filter(Boolean).join(' Â· ') || 'Sin detalle')}
               ${item.notes ? `<br><small>${escapeHtml(item.notes)}</small>` : ''}
             </div>
-          </article>
-        `).join('') : renderEmptyState('Sin asistencia cargada', 'TodavÃ­a no hay sesiones de asistencia en la base o el filtro dejÃ³ la lista vacÃ­a.')}
+            </summary>
+            <div class="attendanceExpanded">
+              <div class="sessionStats">
+                ${[
+                  ['Total', stats.total],
+                  ['Presentes', stats.presente],
+                  ['Ausentes', stats.ausente],
+                  ['Tardes', stats.tarde],
+                  ['Excusados', stats.excusado],
+                  ['Asistencia', `${stats.percent}%`]
+                ].map(([label, value]) => `<span><strong>${escapeHtml(value)}</strong>${escapeHtml(label)}</span>`).join('')}
+              </div>
+              ${item.entries.length ? `
+                <div class="attendanceTable">
+                  ${item.entries.map((entry) => `
+                    <div class="attendanceRow">
+                      <strong>${escapeHtml(entry.studentName || 'Estudiante')}</strong>
+                      <span class="statusPill status-${escapeHtml(statusKey(entry.status))}">${escapeHtml(entry.statusLabel || statusLabel(entry.status))}</span>
+                      <small>${escapeHtml(entry.notes || 'Sin observaciones')}</small>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : renderEmptyState('Sin lista de estudiantes', 'Esta sesion no trae entries, students, attendance ni records con detalle.')}
+            </div>
+          </details>
+        `;
+        }).join('') : renderEmptyState('Sin asistencia cargada', 'TodavÃ­a no hay sesiones de asistencia en la base o el filtro dejÃ³ la lista vacÃ­a.')}
       </div>
     </section>
   `;
@@ -1994,11 +2297,87 @@ function renderSimpleCollectionModule(key, title, intro) {
               <span class="statusPill">${escapeHtml(formatDate(item.updatedAt) || 'Registro')}</span>
             </div>
             <div class="recordBody">
-              ${escapeHtml(item.subtitle || item.notes || 'Sin descripciÃ³n.')}
+              ${key === 'monthlyReports' ? `
+                <strong>Docente:</strong> ${escapeHtml(item.teacherName || 'Docente')}<br>
+                <strong>Area:</strong> ${escapeHtml(item.area || 'Sin area')}<br>
+                <strong>Periodo:</strong> ${escapeHtml(item.periodKey || [item.month, item.year].filter(Boolean).join('/'))}<br>
+                <strong>Avances:</strong> ${escapeHtml(item.achievements || 'Sin avances registrados.')}<br>
+                <strong>Retos:</strong> ${escapeHtml(item.challenges || 'Sin retos registrados.')}<br>
+                <strong>Proyeccion:</strong> ${escapeHtml(item.projection || 'Sin proyeccion registrada.')}<br>
+                <strong>Recomendaciones:</strong> ${escapeHtml(item.recommendations || 'Sin recomendaciones registradas.')}
+              ` : escapeHtml(item.subtitle || item.notes || 'Sin descripciÃ³n.')}
               ${item.notes && item.subtitle !== item.notes ? `<br><small>${escapeHtml(item.notes)}</small>` : ''}
             </div>
           </article>
         `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function supportStatusLabel(status) {
+  return { open: 'Abierto', inReview: 'En revision', resolved: 'Resuelto', archived: 'Archivado' }[status] || 'Abierto';
+}
+
+function renderSupportAdminModule() {
+  if (!isRole('admin')) return renderEmptyState('Acceso denegado', 'Solo usuarios admin pueden ver los reportes de soporte.');
+  const filter = STATE.filters.supportStatus || 'all';
+  const tickets = STATE.data.supportAdmin.items
+    .filter((item) => filter === 'all' || item.status === filter)
+    .sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0));
+  return `
+    <section class="moduleSurface">
+      <div class="moduleSurfaceHead">
+        <div>
+          <h4 class="moduleTitle">Soporte</h4>
+          <p class="moduleIntro">Reportes enviados por el equipo desde el HUB.</p>
+        </div>
+      </div>
+      <div class="toolbarRow">
+        <label class="field">
+          <span class="fieldLabel">Estado</span>
+          <select class="input" id="support-status-filter">
+            ${[
+              ['all', 'Todos'],
+              ['open', 'Abierto'],
+              ['inReview', 'En revision'],
+              ['resolved', 'Resuelto'],
+              ['archived', 'Archivado']
+            ].map(([value, label]) => `<option value="${value}"${filter === value ? ' selected' : ''}>${label}</option>`).join('')}
+          </select>
+        </label>
+        <div class="toolbarMeta">${tickets.length} reportes</div>
+      </div>
+      <div class="supportTicketList">
+        ${tickets.length ? tickets.map((ticket) => `
+          <article class="recordCard supportTicketCard" data-ticket-id="${escapeHtml(ticket.id)}">
+            <div class="recordCardTop">
+              <div>
+                <div class="recordTitle">${escapeHtml(ticket.title)}</div>
+                <div class="recordMeta">${escapeHtml([ticket.category, ticket.priority, ticket.createdByName, formatDate(ticket.createdAt, { withTime: true })].filter(Boolean).join(' - '))}</div>
+              </div>
+              <span class="statusPill support-${escapeHtml(ticket.status)}">${escapeHtml(supportStatusLabel(ticket.status))}</span>
+            </div>
+            <div class="recordBody">
+              <strong>Modulo:</strong> ${escapeHtml(ticket.moduleId || 'Otro')}<br>
+              <strong>Usuario:</strong> ${escapeHtml(ticket.createdByEmail || 'Sin correo')}<br>
+              ${escapeHtml(ticket.description || 'Sin descripcion.')}
+            </div>
+            <div class="supportAdminControls">
+              <label class="field">
+                <span class="fieldLabel">Estado</span>
+                <select class="input" data-ticket-status>
+                  ${['open', 'inReview', 'resolved', 'archived'].map((status) => `<option value="${status}"${ticket.status === status ? ' selected' : ''}>${supportStatusLabel(status)}</option>`).join('')}
+                </select>
+              </label>
+              <label class="field fieldSpan2">
+                <span class="fieldLabel">Notas admin</span>
+                <textarea class="input textarea" rows="3" data-ticket-notes>${escapeHtml(ticket.adminNotes || '')}</textarea>
+              </label>
+              <button class="btnPrimary" type="button" data-ticket-save>Guardar</button>
+            </div>
+          </article>
+        `).join('') : renderEmptyState('Sin reportes', 'No hay tickets de soporte para el filtro seleccionado.')}
       </div>
     </section>
   `;
@@ -2044,6 +2423,101 @@ function isTeacherChange(item) {
   return text.includes('cambio') || text.includes('contingencia') || text.includes('reemplazo') || text.includes('suplencia');
 }
 
+function getWeekdayLabel(value) {
+  const ms = toMillis(value);
+  if (!ms) return '';
+  return new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', weekday: 'long' }).format(new Date(ms));
+}
+
+function getTimeMinutesFromAny(value) {
+  const text = normalizeText(value);
+  const timeOnlyMatch = text.match(/^(\d{1,2}):(\d{2})(?:\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm))?$/i);
+  if (timeOnlyMatch) {
+    let hour = Number(timeOnlyMatch[1]);
+    const minute = Number(timeOnlyMatch[2]);
+    const meridiem = safeLower(timeOnlyMatch[3] || '');
+    if (meridiem.includes('p') && hour < 12) hour += 12;
+    if (meridiem.includes('a') && hour === 12) hour = 0;
+    return (hour * 60) + minute;
+  }
+  const ms = toMillis(value);
+  if (ms) {
+    const parts = new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ms));
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
+    return (hour * 60) + minute;
+  }
+  const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+  if (timeMatch) return (Number(timeMatch[1]) * 60) + Number(timeMatch[2]);
+  return null;
+}
+
+function findScheduleForShift(shift, schedules = []) {
+  const shiftDay = normalizeDayKey(getWeekdayLabel(shift.checkIn || shift.date));
+  const teacherEmail = comparableText(shift.teacherEmail || '');
+  const teacherId = comparableText(shift.teacherId || '');
+  const teacherName = comparableText(shift.teacherName || '');
+  return schedules.find((schedule) => {
+    if (shiftDay && normalizeDayKey(schedule.day) !== shiftDay) return false;
+    if (teacherEmail && comparableText(schedule.teacherEmail) === teacherEmail) return true;
+    if (teacherId && comparableText(schedule.teacherId) === teacherId) return true;
+    return teacherName && comparableText(schedule.teacherName) === teacherName;
+  }) || null;
+}
+
+function classifyPunctuality(shift, schedules = []) {
+  const checkInMinutes = getTimeMinutesFromAny(shift.checkIn || shift.date);
+  const schedule = findScheduleForShift(shift, schedules);
+  if (!checkInMinutes && !shift.checkIn) return { type: 'missingCheckIn', label: 'Sin entrada', schedule, diff: null };
+  if (!schedule) return { type: 'noSchedule', label: 'Sin horario', schedule: null, diff: null };
+  const start = parseTimeToMinutes(schedule.startTime);
+  if (!Number.isFinite(start)) return { type: 'noSchedule', label: 'Sin horario', schedule: null, diff: null };
+  const diff = checkInMinutes - start;
+  if (!shift.checkOut) return { type: 'open', label: 'Abierta', schedule, diff };
+  if (diff < 0) return { type: 'early', label: 'Antes de hora', schedule, diff };
+  if (diff <= PUNCTUALITY_TOLERANCE_MINUTES) return { type: 'onTime', label: 'Puntual', schedule, diff };
+  return { type: 'late', label: 'Tarde', schedule, diff };
+}
+
+function getPunctualityStats(shifts = [], schedules = []) {
+  const classified = shifts.map((shift) => ({ ...shift, punctuality: classifyPunctuality(shift, schedules) }));
+  const withSchedule = classified.filter((item) => item.punctuality.schedule && item.punctuality.type !== 'missingCheckIn');
+  const onTime = withSchedule.filter((item) => item.punctuality.type === 'onTime' || item.punctuality.type === 'early').length;
+  const lateItems = withSchedule.filter((item) => item.punctuality.type === 'late');
+  const open = classified.filter((item) => item.punctuality.type === 'open').length;
+  const noSchedule = classified.filter((item) => item.punctuality.type === 'noSchedule').length;
+  const teacherMap = new Map();
+  classified.forEach((item) => {
+    const key = item.teacherEmail || item.teacherName || item.id;
+    if (!teacherMap.has(key)) teacherMap.set(key, { teacherName: item.teacherName, total: 0, onTime: 0, late: 0, lateMinutes: [], last: item.date || item.checkIn });
+    const row = teacherMap.get(key);
+    row.total += 1;
+    if (item.punctuality.type === 'onTime' || item.punctuality.type === 'early') row.onTime += 1;
+    if (item.punctuality.type === 'late') {
+      row.late += 1;
+      row.lateMinutes.push(Math.max(0, item.punctuality.diff || 0));
+    }
+    if (toMillis(item.checkIn || item.date) > toMillis(row.last)) row.last = item.checkIn || item.date;
+  });
+  return {
+    classified,
+    total: classified.length,
+    withSchedule: withSchedule.length,
+    onTime,
+    late: lateItems.length,
+    noSchedule,
+    open,
+    percent: withSchedule.length ? Math.round((onTime / withSchedule.length) * 100) : 0,
+    avgLate: lateItems.length ? Math.round(lateItems.reduce((sum, item) => sum + Math.max(0, item.punctuality.diff || 0), 0) / lateItems.length) : 0,
+    maxLate: lateItems.length ? Math.max(...lateItems.map((item) => Math.max(0, item.punctuality.diff || 0))) : 0,
+    teachers: [...teacherMap.values()].map((item) => ({
+      ...item,
+      percent: item.total ? Math.round((item.onTime / item.total) * 100) : 0,
+      avgLate: item.lateMinutes.length ? Math.round(item.lateMinutes.reduce((sum, val) => sum + val, 0) / item.lateMinutes.length) : 0
+    })).sort((a, b) => a.teacherName.localeCompare(b.teacherName, 'es'))
+  };
+}
+
 function buildReportPrompt(summary) {
   const areas = summary.areas.map((area) => (
     `${area.name}: ${area.sessionsDone} sesiones realizadas, ${area.participants} participantes/NNA, ${area.compliance}% de cumplimiento. Avances: ${area.advances.join('; ') || 'sin avances registrados'}. Retos: ${area.challenges.join('; ') || 'sin retos registrados'}. Proyeccion: ${area.projection.join('; ') || 'continuar proceso formativo'}.`
@@ -2052,6 +2526,8 @@ function buildReportPrompt(summary) {
   return [
     `Eres un redactor experto de informes de gestion. Redacta un informe mensual para la Fundacion San Antonio - ${getCenterName()} del mes ${summary.periodLabel} con los siguientes datos:`,
     `Indicadores clave: ${summary.metrics.scheduled} sesiones programadas, ${summary.metrics.done} sesiones realizadas, ${summary.metrics.compliance}% de cumplimiento, ${summary.metrics.children} NNA atendidos, ${summary.metrics.hours} horas realizadas, ${summary.metrics.punctuality}% de puntualidad docente y ${summary.metrics.contingencies} contingencias o cambios de docente.`,
+    `Fuentes academicas del periodo: ${summary.metrics.diagnostics} diagnosticos, ${summary.metrics.projects} proyectos, ${summary.metrics.samples} muestras de proceso y ${summary.metrics.monthlyReports} informes mensuales docentes.`,
+    `Sintesis de informes mensuales: ${summary.monthlyReportSynthesis?.join('; ') || 'sin informes mensuales registrados para el periodo'}.`,
     `Proceso por areas:\n${areas}`,
     `Avances generales: ${summary.generalAdvances.join('; ')}.`,
     `Retos generales: ${summary.generalChallenges.join('; ')}.`,
@@ -2082,8 +2558,10 @@ async function loadReportSummary(force = false) {
       readCollection('students', force),
       readCollection('logs', force),
       readCollection('diagnostics', force),
+      readCollection('projects', force),
       readCollection('gallery', force),
-      readCollection('samples', force)
+      readCollection('samples', force),
+      readCollection('monthlyReports', force)
     ]);
 
     const scheduled = STATE.data.calendar.items.filter((item) => isRecordInPeriod(item, year, month));
@@ -2091,8 +2569,10 @@ async function loadReportSummary(force = false) {
     const shifts = STATE.data.punctuality.items.filter((item) => isRecordInPeriod(item, year, month));
     const logs = STATE.data.logs.items.filter((item) => isRecordInPeriod(item, year, month));
     const diagnostics = STATE.data.diagnostics.items.filter((item) => isRecordInPeriod(item, year, month));
+    const projects = STATE.data.projects.items.filter((item) => isRecordInPeriod(item, year, month));
     const galleries = STATE.data.gallery.items.filter((item) => isRecordInPeriod(item, year, month));
     const samples = STATE.data.samples.items.filter((item) => isRecordInPeriod(item, year, month));
+    const monthlyReports = STATE.data.monthlyReports.items.filter((item) => isRecordInPeriod(item, year, month));
 
     const childSet = new Set();
     let participantTouches = 0;
@@ -2117,7 +2597,11 @@ async function loadReportSummary(force = false) {
       children: childSet.size || participantTouches || STATE.data.students.items.filter((item) => item.active !== false).length,
       hours: Math.round(attendance.reduce((sum, item) => sum + estimateSessionHours(item), 0) * 10) / 10,
       punctuality: shifts.length ? Math.round((punctualCount / shifts.length) * 100) : 0,
-      contingencies
+      contingencies,
+      diagnostics: diagnostics.length,
+      projects: projects.length,
+      samples: samples.length,
+      monthlyReports: monthlyReports.length
     };
 
     const areas = ['Porras', 'Danzas'].map((name) => {
@@ -2125,6 +2609,9 @@ async function loadReportSummary(force = false) {
       const areaScheduled = scheduled.filter((item) => areaKey(getRecordArea(item) || item.title) === name);
       const areaLogs = logs.filter((item) => areaKey(getRecordArea(item)) === name);
       const areaDiagnostics = diagnostics.filter((item) => areaKey(getRecordArea(item)) === name);
+      const areaProjects = projects.filter((item) => areaKey(getRecordArea(item)) === name);
+      const areaSamples = samples.filter((item) => areaKey(getRecordArea(item)) === name);
+      const areaMonthlyReports = monthlyReports.filter((item) => areaKey(getRecordArea(item)) === name);
       const participants = new Set();
       areaAttendance.forEach((session) => (session.entries || []).forEach((entry) => {
         const key = getAttendanceStudentKey(entry);
@@ -2138,9 +2625,9 @@ async function loadReportSummary(force = false) {
         sessionsDone: areaAttendance.length,
         participants: participants.size || areaAttendance.reduce((sum, item) => sum + getAttendancePresentCount(item), 0),
         compliance: areaScheduled.length ? Math.round((areaAttendance.length / areaScheduled.length) * 100) : (areaAttendance.length ? 100 : 0),
-        advances: uniqueText([...areaLogs.map((item) => item.achievements), ...areaDiagnostics.map((item) => item.achievements || item.subtitle || item.notes)], 6),
-        challenges: uniqueText([...areaLogs.map((item) => item.challenges), ...areaDiagnostics.map((item) => item.challenges)], 6),
-        projection: uniqueText([...areaLogs.map((item) => item.followUp), ...areaDiagnostics.map((item) => item.followUp)], 5)
+        advances: uniqueText([...areaLogs.map((item) => item.achievements), ...areaDiagnostics.map((item) => item.achievements || item.subtitle || item.notes), ...areaProjects.map((item) => item.achievements || item.subtitle), ...areaSamples.map((item) => item.achievements || item.subtitle), ...areaMonthlyReports.map((item) => item.achievements)], 6),
+        challenges: uniqueText([...areaLogs.map((item) => item.challenges), ...areaDiagnostics.map((item) => item.challenges), ...areaProjects.map((item) => item.challenges), ...areaSamples.map((item) => item.challenges), ...areaMonthlyReports.map((item) => item.challenges)], 6),
+        projection: uniqueText([...areaLogs.map((item) => item.followUp), ...areaDiagnostics.map((item) => item.followUp), ...areaProjects.map((item) => item.followUp), ...areaSamples.map((item) => item.followUp), ...areaMonthlyReports.map((item) => item.projection || item.recommendations)], 5)
       };
     });
 
@@ -2148,6 +2635,8 @@ async function loadReportSummary(force = false) {
       ...galleries.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Registro fotografico', url }))),
       ...samples.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Muestra de proceso', url }))),
       ...diagnostics.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Diagnostico inicial', url }))),
+      ...projects.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Proyecto', url }))),
+      ...monthlyReports.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.title || 'Informe mensual', url }))),
       ...attendance.flatMap((item) => getItemLinks(item).map((url) => ({ label: item.sessionName || 'Planilla de asistencia', url })))
     ].slice(0, 16);
 
@@ -2159,21 +2648,28 @@ async function loadReportSummary(force = false) {
       generalAdvances: uniqueText([
         'Ejecucion y seguimiento de las sesiones programadas',
         diagnostics.length ? 'Consolidacion de diagnosticos iniciales' : '',
+        projects.length ? 'Seguimiento de proyectos pedagogicos del periodo' : '',
+        samples.length ? 'Avance en muestras de proceso y evidencias' : '',
+        monthlyReports.length ? 'Incorporacion de informes mensuales docentes' : '',
         logs.length ? 'Uso de bitacoras y nueva app para seguimiento academico' : '',
         metrics.children ? `Alta participacion de ${metrics.children} NNA atendidos` : '',
-        ...logs.map((item) => item.achievements)
+        ...logs.map((item) => item.achievements),
+        ...monthlyReports.map((item) => item.achievements)
       ], 8),
       generalChallenges: uniqueText([
         'Fortalecer concentracion y memoria corporal',
         'Mejorar coordinacion, precision y limpieza tecnica',
         'Ajustar intensidad segun energia y disposicion del grupo',
-        ...logs.map((item) => item.challenges)
+        ...logs.map((item) => item.challenges),
+        ...monthlyReports.map((item) => item.challenges)
       ], 8),
       news: uniqueText([
         metrics.contingencies ? `${metrics.contingencies} contingencias o cambios de docente registrados` : '',
         areas.some((area) => area.participants > 0) ? 'Seguimiento diferenciado por areas de Porras y Danzas' : '',
         galleries.length || samples.length ? 'Evidencias digitales disponibles para el periodo' : '',
-        diagnostics.length ? 'Activacion o consulta de diagnosticos iniciales' : ''
+        diagnostics.length ? 'Activacion o consulta de diagnosticos iniciales' : '',
+        projects.length ? `${projects.length} proyectos registrados o consultados` : '',
+        monthlyReports.length ? `${monthlyReports.length} informes mensuales docentes incluidos` : ''
       ], 6),
       scheduleTeam: uniqueText([
         shifts.length ? `${punctualCount} de ${shifts.length} registros docentes se reportan puntuales` : 'Sin registros de puntualidad docente para el periodo',
@@ -2181,6 +2677,12 @@ async function loadReportSummary(force = false) {
         metrics.contingencies ? 'Se recomienda documentar causas y reemplazos de contingencias' : 'No se evidencian contingencias docentes en los registros consultados'
       ], 5),
       evidence,
+      monthlyReportSynthesis: uniqueText([
+        ...monthlyReports.map((item) => item.achievements),
+        ...monthlyReports.map((item) => item.challenges),
+        ...monthlyReports.map((item) => item.projection),
+        ...monthlyReports.map((item) => item.recommendations)
+      ], 10),
       recommendations: [
         'Mantener grupos por edades y niveles de proceso',
         'Profundizar fuerza, flexibilidad, coordinacion y memoria corporal',
@@ -2276,7 +2778,11 @@ function renderReportModule() {
             ['NNA atendidos', summary.metrics.children],
             ['Horas realizadas', summary.metrics.hours],
             ['Puntualidad', `${summary.metrics.punctuality}%`],
-            ['Contingencias', summary.metrics.contingencies]
+            ['Contingencias', summary.metrics.contingencies],
+            ['Diagnosticos', summary.metrics.diagnostics],
+            ['Proyectos', summary.metrics.projects],
+            ['Muestras de proceso', summary.metrics.samples],
+            ['Informes mensuales', summary.metrics.monthlyReports]
           ].map(([label, value]) => `
             <article class="heroStat reportMetric">
               <span class="heroStatLabel">${escapeHtml(label)}</span>
@@ -2306,6 +2812,7 @@ function renderReportModule() {
           ${renderReportList('Retos generales', summary.generalChallenges)}
           ${renderReportList('Novedades relevantes', summary.news)}
           ${renderReportList('Cumplimiento de horarios y equipo', summary.scheduleTeam)}
+          ${renderReportList('Sintesis informes mensuales', summary.monthlyReportSynthesis)}
           ${renderReportList('Recomendaciones', summary.recommendations)}
           ${renderReportList('Comentarios finales', summary.finalComments)}
         </div>
@@ -2394,11 +2901,23 @@ const MODULE_CONFIG = {
     subtitle: 'Consulta de muestras y preparacion.',
     render: () => renderSimpleCollectionModule('samples', 'Muestras de proceso', 'Seguimiento de muestras y evidencias.')
   },
+  monthlyReports: {
+    eyebrow: 'Seguimiento academico',
+    title: 'Informes mensuales',
+    subtitle: 'Consulta de informes mensuales diligenciados por docentes.',
+    render: () => renderSimpleCollectionModule('monthlyReports', 'Informes mensuales', 'Registros mensuales diligenciados por docentes.')
+  },
   report: {
     eyebrow: 'Administracion',
     title: 'Resumen informes',
     subtitle: 'Consolidado mensual y anual para informes.',
     render: renderReportModule
+  },
+  supportAdmin: {
+    eyebrow: 'Administracion',
+    title: 'Soporte',
+    subtitle: 'Reportes enviados por el equipo.',
+    render: renderSupportAdminModule
   }
 };
 
@@ -2449,6 +2968,10 @@ async function openWorkspaceModule(moduleId) {
     await readScheduleAreaOptions(true);
   }
 
+  if (moduleId === 'punctuality') {
+    await readCollection('schedule', true);
+  }
+
   if (moduleId === 'report') {
     renderWorkspaceModule();
     openModal('modal-workspace');
@@ -2473,6 +2996,9 @@ async function refreshActiveModule() {
   if (STATE.currentModule === 'schedule') {
     await readSchedulePlaceOptions(true);
     await readScheduleAreaOptions(true);
+  }
+  if (STATE.currentModule === 'punctuality') {
+    await readCollection('schedule', true);
   }
   if (STATE.currentModule === 'report') {
     await loadReportSummary(true);
@@ -2563,12 +3089,8 @@ function wireDrawerHandlers(auth) {
     }
 
     if (action === 'support') {
-      openExternal(HUB.links.supportMail);
+      openSupportModal();
       return;
-    }
-
-    if (action === 'switchHub') {
-      toast('Este panel estÃ¡ dedicado solo a lÃ­deres.');
     }
   });
 
@@ -2584,13 +3106,17 @@ function wireModals() {
   [
     ['btn-search-close', 'modal-search'],
     ['btn-favorites-close', 'modal-favorites'],
-    ['btn-workspace-close', 'modal-workspace']
+    ['btn-workspace-close', 'modal-workspace'],
+    ['btn-support-close', 'modal-support'],
+    ['btn-support-cancel', 'modal-support']
   ].forEach(([buttonId, modalId]) => {
     document.getElementById(buttonId)?.addEventListener('click', () => closeModal(modalId));
     document.getElementById(modalId)?.addEventListener('click', (event) => {
       if (event.target.id === modalId) closeModal(modalId);
     });
   });
+
+  $('#support-form')?.addEventListener('submit', submitSupportTicket);
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -2652,6 +3178,12 @@ function bindWorkspaceModal() {
     if (target.id === 'report-year-filter') {
       STATE.filters.reportYear = target.value || String(new Date().getFullYear());
       loadReportSummary(true).then(() => renderWorkspaceModule());
+      return;
+    }
+
+    if (target.id === 'support-status-filter') {
+      STATE.filters.supportStatus = target.value || 'all';
+      renderWorkspaceModule();
     }
   });
 
@@ -2668,6 +3200,33 @@ function bindWorkspaceModal() {
       } catch (error) {
         console.error(error);
         toast('No se pudo copiar el prompt.');
+      }
+      return;
+    }
+
+    const saveTicketBtn = event.target.closest('[data-ticket-save]');
+    if (saveTicketBtn) {
+      const card = saveTicketBtn.closest('[data-ticket-id]');
+      const id = card?.getAttribute('data-ticket-id');
+      const nextStatus = card?.querySelector('[data-ticket-status]')?.value || 'open';
+      const adminNotes = normalizeText(card?.querySelector('[data-ticket-notes]')?.value || '');
+      if (!id) return;
+      saveTicketBtn.disabled = true;
+      try {
+        const payload = { status: nextStatus, adminNotes, updatedAt: serverTimestamp() };
+        if (nextStatus === 'resolved') {
+          payload.resolvedAt = serverTimestamp();
+          payload.resolvedByEmail = ACTIVE_EMAIL;
+        }
+        await updateDoc(doc(DB, COLLECTIONS.supportTickets, id), payload);
+        toast('Ticket actualizado.');
+        await readCollection('supportAdmin', true);
+        renderWorkspaceModule();
+      } catch (error) {
+        console.error(error);
+        toast('No se pudo actualizar el ticket.');
+      } finally {
+        saveTicketBtn.disabled = false;
       }
       return;
     }

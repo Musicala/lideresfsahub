@@ -1244,6 +1244,135 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   resize:vertical;
   line-height:1.5;
 }
+
+.statGrid,
+.areaStatsGrid,
+.teacherStatsGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:12px;
+  margin:16px 0;
+}
+.statCard,
+.areaStatCard,
+.teacherStatCard{
+  border:1px solid rgba(12,65,196,.12);
+  border-radius:18px;
+  background:rgba(255,255,255,.88);
+  box-shadow:0 12px 30px rgba(24,45,93,.08);
+  padding:14px;
+}
+.statCard span,
+.areaStatCard span,
+.teacherStatCard span,
+.teacherStatCard small{
+  display:block;
+  color:var(--muted);
+  font-size:.86rem;
+  margin-top:4px;
+}
+.statCard strong{
+  display:block;
+  margin-top:6px;
+  font-size:1.45rem;
+  color:var(--ink);
+}
+.attendanceDetailCard{
+  padding:0;
+}
+.attendanceSummary{
+  cursor:pointer;
+  list-style:none;
+  padding:16px;
+}
+.attendanceSummary::-webkit-details-marker{
+  display:none;
+}
+.attendanceExpanded{
+  border-top:1px solid rgba(12,65,196,.10);
+  padding:14px 16px 16px;
+}
+.sessionStats{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+  gap:8px;
+  margin-bottom:12px;
+}
+.sessionStats span{
+  border-radius:14px;
+  background:rgba(12,65,196,.06);
+  padding:10px;
+  color:var(--muted);
+  font-size:.8rem;
+}
+.sessionStats strong{
+  display:block;
+  color:var(--ink);
+}
+.attendanceTable{
+  display:grid;
+  gap:8px;
+}
+.attendanceRow{
+  display:grid;
+  grid-template-columns:minmax(0,1.4fr) auto minmax(120px,1fr);
+  gap:10px;
+  align-items:center;
+  border:1px solid rgba(12,65,196,.10);
+  border-radius:14px;
+  padding:10px;
+}
+.status-presente,
+.punctuality-onTime,
+.support-resolved{
+  background:rgba(34,197,94,.14);
+  color:#166534;
+}
+.status-ausente,
+.punctuality-late{
+  background:rgba(239,68,68,.14);
+  color:#991b1b;
+}
+.status-tarde,
+.punctuality-open,
+.support-open,
+.support-inReview{
+  background:rgba(245,158,11,.16);
+  color:#92400e;
+}
+.status-excusado,
+.punctuality-early{
+  background:rgba(59,130,246,.14);
+  color:#1d4ed8;
+}
+.status-otro,
+.punctuality-noSchedule,
+.punctuality-missingCheckIn,
+.support-archived{
+  background:rgba(100,116,139,.14);
+  color:#475569;
+}
+.inlineAlert{
+  border:1px solid rgba(245,158,11,.25);
+  background:rgba(245,158,11,.10);
+  color:#7c2d12;
+  border-radius:16px;
+  padding:12px 14px;
+  margin:12px 0;
+}
+.supportForm,
+.supportAdminControls{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+}
+.supportTicketList{
+  display:grid;
+  gap:14px;
+}
+.supportTicketCard .recordBody{
+  margin-bottom:14px;
+}
 .dangerBtn{
   color:var(--danger);
   border-color:rgba(185,77,43,.26);
@@ -1849,6 +1978,11 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
 }
 
 @media (max-width: 760px){
+  .attendanceRow,
+  .supportForm,
+  .supportAdminControls{
+    grid-template-columns:1fr;
+  }
   .logoWrap{
     width:42px;
     height:42px;
