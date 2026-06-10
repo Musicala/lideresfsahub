@@ -128,6 +128,7 @@ let modalBound = false;
 let workspaceBound = false;
 let scheduleEditorState = { editingId: '', placeListEditing: false, placeDraft: [], areaListEditing: false, areaDraft: [] };
 let calendarEditorState = { editingId: '' };
+let punctualityEditorState = { editingId: '' };
 
 const STATE = {
   currentModule: '',
@@ -359,6 +360,10 @@ function canManageTeacherSchedules() {
 }
 
 function canManageCalendarEvents() {
+  return isRole('admin');
+}
+
+function canManagePunctualityRecords() {
   return isRole('admin');
 }
 
@@ -925,6 +930,32 @@ function dateInputFromAny(value) {
   return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
 }
 
+function datetimeInputFromAny(value) {
+  const ms = toMillis(value);
+  if (!ms) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(new Date(ms));
+    const get = (type) => parts.find((part) => part.type === type)?.value || '';
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+  } catch (_) {
+    return '';
+  }
+}
+
+function bogotaDatetimeInputToIso(value) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  return `${text.length === 16 ? `${text}:00` : text}-05:00`;
+}
+
 function getRecordDateKey(item) {
   const periodKey = normalizeText(item?.periodKey || item?.period || '');
   if (/^\d{4}-\d{1,2}$/.test(periodKey)) {
@@ -993,9 +1024,41 @@ function getAttendanceSessionStats(session) {
 }
 
 function getAttendanceStats(sessions = []) {
-  const totals = { sessions: sessions.length, total: 0, unique: 0, presente: 0, ausente: 0, tarde: 0, excusado: 0, percent: 0, avgSession: 0, areas: [] };
+  const totals = {
+    sessions: sessions.length,
+    total: 0,
+    unique: 0,
+    presente: 0,
+    ausente: 0,
+    tarde: 0,
+    excusado: 0,
+    percent: 0,
+    avgSession: 0,
+    sessionsWithAbsent: 0,
+    sessionsWithoutAbsent: 0,
+    maxSessionSize: 0,
+    areas: [],
+    sites: [],
+    days: [],
+    bestArea: null,
+    riskArea: null,
+    largestSession: null,
+    recentSession: null
+  };
   const unique = new Set();
   const areaMap = new Map();
+  const siteMap = new Map();
+  const dayMap = new Map();
+  const updateSegment = (map, key, stats) => {
+    const label = normalizeText(key || 'Sin dato') || 'Sin dato';
+    if (!map.has(label)) map.set(label, { label, sessions: 0, presentLike: 0, total: 0, absent: 0, late: 0 });
+    const row = map.get(label);
+    row.sessions += 1;
+    row.total += stats.total;
+    row.presentLike += stats.presente + stats.tarde + stats.excusado;
+    row.absent += stats.ausente;
+    row.late += stats.tarde;
+  };
   sessions.forEach((session) => {
     const stats = getAttendanceSessionStats(session);
     totals.total += stats.total;
@@ -1003,12 +1066,23 @@ function getAttendanceStats(sessions = []) {
     totals.ausente += stats.ausente;
     totals.tarde += stats.tarde;
     totals.excusado += stats.excusado;
+    if (stats.ausente > 0) totals.sessionsWithAbsent += 1;
+    if (stats.total > 0 && stats.ausente === 0) totals.sessionsWithoutAbsent += 1;
+    if (stats.total > totals.maxSessionSize) {
+      totals.maxSessionSize = stats.total;
+      totals.largestSession = session;
+    }
+    if (toMillis(session.date) > toMillis(totals.recentSession?.date || '')) totals.recentSession = session;
     const area = normalizeText(session.area || 'Otra area') || 'Otra area';
-    if (!areaMap.has(area)) areaMap.set(area, { area, sessions: 0, presentLike: 0, total: 0, participants: new Set() });
+    if (!areaMap.has(area)) areaMap.set(area, { area, sessions: 0, presentLike: 0, total: 0, absent: 0, late: 0, participants: new Set() });
     const areaStats = areaMap.get(area);
     areaStats.sessions += 1;
     areaStats.total += stats.total;
     areaStats.presentLike += stats.presente + stats.tarde + stats.excusado;
+    areaStats.absent += stats.ausente;
+    areaStats.late += stats.tarde;
+    updateSegment(siteMap, session.siteName || 'Sin sede', stats);
+    updateSegment(dayMap, getWeekdayLabel(session.date) || 'Sin fecha', stats);
     (session.entries || []).forEach((entry) => {
       const key = getAttendanceStudentKey(entry);
       if (key) {
@@ -1025,8 +1099,28 @@ function getAttendanceStats(sessions = []) {
     area: item.area,
     sessions: item.sessions,
     participants: item.participants.size,
+    absent: item.absent,
+    late: item.late,
     percent: item.total ? Math.round((item.presentLike / item.total) * 100) : 0
   })).sort((a, b) => a.area.localeCompare(b.area, 'es'));
+  totals.sites = [...siteMap.values()].map((item) => ({
+    site: item.label,
+    sessions: item.sessions,
+    total: item.total,
+    absent: item.absent,
+    late: item.late,
+    percent: item.total ? Math.round((item.presentLike / item.total) * 100) : 0
+  })).sort((a, b) => b.total - a.total).slice(0, 8);
+  totals.days = [...dayMap.values()].map((item) => ({
+    day: item.label,
+    sessions: item.sessions,
+    total: item.total,
+    absent: item.absent,
+    late: item.late,
+    percent: item.total ? Math.round((item.presentLike / item.total) * 100) : 0
+  })).sort((a, b) => b.total - a.total).slice(0, 8);
+  totals.bestArea = totals.areas.filter((area) => area.total !== 0).sort((a, b) => b.percent - a.percent || b.sessions - a.sessions)[0] || null;
+  totals.riskArea = totals.areas.filter((area) => area.total !== 0).sort((a, b) => b.absent - a.absent || a.percent - b.percent)[0] || null;
   return totals;
 }
 
@@ -1040,6 +1134,36 @@ function getItemLinks(item) {
     item.evidenceLinks.forEach((link) => links.push(normalizeUrl(typeof link === 'string' ? link : link?.url || '')));
   }
   return uniqueText(links, 20);
+}
+
+function collectUrlsFromValue(value) {
+  if (!value) return [];
+  if (typeof value === 'string') return [normalizeUrl(value)].filter(Boolean);
+  if (Array.isArray(value)) return value.flatMap(collectUrlsFromValue);
+  if (typeof value === 'object') {
+    return [
+      value.url,
+      value.link,
+      value.href,
+      value.src,
+      value.path,
+      value.imageUrl,
+      value.photoUrl,
+      value.fileUrl,
+      value.downloadURL,
+      value.downloadUrl,
+      value.storageUrl,
+      value.evidenceUrl
+    ].flatMap(collectUrlsFromValue);
+  }
+  return [];
+}
+
+function isLikelyImageUrl(url) {
+  const text = safeLower(url);
+  return /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/.test(text)
+    || text.includes('firebasestorage.googleapis.com')
+    || text.includes('googleusercontent.com');
 }
 
 function getCalendarYearOptions(items = []) {
@@ -1382,19 +1506,61 @@ function normalizeAttendance(doc) {
 }
 
 function normalizeLog(doc) {
+  const evidenceLinks = uniqueText([
+    ...collectUrlsFromValue(doc.url),
+    ...collectUrlsFromValue(doc.link),
+    ...collectUrlsFromValue(doc.fileUrl),
+    ...collectUrlsFromValue(doc.folderUrl),
+    ...collectUrlsFromValue(doc.driveUrl),
+    ...collectUrlsFromValue(doc.storageUrl),
+    ...collectUrlsFromValue(doc.evidenceUrl),
+    ...collectUrlsFromValue(doc.evidenceLinks),
+    ...collectUrlsFromValue(doc.links),
+    ...collectUrlsFromValue(doc.attachments),
+    ...collectUrlsFromValue(doc.files),
+    ...collectUrlsFromValue(doc.media)
+  ], 30);
+  const imageLinks = uniqueText([
+    ...collectUrlsFromValue(doc.imageUrl),
+    ...collectUrlsFromValue(doc.photoUrl),
+    ...collectUrlsFromValue(doc.evidenceImageUrl),
+    ...collectUrlsFromValue(doc.evidenceImages),
+    ...collectUrlsFromValue(doc.images),
+    ...collectUrlsFromValue(doc.imageUrls),
+    ...collectUrlsFromValue(doc.photos),
+    ...collectUrlsFromValue(doc.gallery),
+    ...evidenceLinks.filter(isLikelyImageUrl)
+  ], 30);
+  const extraDetails = [
+    ['Asistencia', doc.attendanceSummary || doc.assistanceSummary || doc.assistance || doc.attendanceNotes],
+    ['Participantes', doc.participantsSummary || doc.participants || doc.studentsSummary],
+    ['Materiales', doc.materials || doc.resources || doc.materiales],
+    ['Metodologia', doc.methodology || doc.metodologia || doc.strategy || doc.strategies],
+    ['Evaluacion', doc.evaluation || doc.evaluacion || doc.assessment],
+    ['Observaciones', doc.observations || doc.observaciones],
+    ['Novedades', doc.news || doc.incidents || doc.novedades],
+    ['Acuerdos', doc.agreements || doc.acuerdos],
+    ['Proxima clase', doc.nextSession || doc.nextClass || doc.proximaClase],
+    ['Recomendaciones', doc.recommendations || doc.recomendaciones]
+  ].map(([label, value]) => ({ label, value: normalizeText(Array.isArray(value) ? value.join(', ') : value) }))
+    .filter((item) => item.value);
+
   return {
     id: doc.id,
-    date: normalizeText(doc.date || ''),
-    sessionName: normalizeText(doc.sessionName || doc.title || 'BitÃ¡cora'),
+    date: normalizeText(doc.date || doc.fecha || doc.createdAt || ''),
+    sessionName: normalizeText(doc.sessionName || doc.title || doc.titulo || doc.sesion || 'BitÃ¡cora'),
     area: normalizeText(doc.area || doc.areaId || doc.primaryAreaId || ''),
-    teacherName: normalizeText(doc.teacherName || doc.teacherLabel || ''),
-    studentGroup: normalizeText(doc.studentGroup || doc.groupName || ''),
-    objective: normalizeText(doc.objective || ''),
-    activities: normalizeText(doc.activities || ''),
-    achievements: normalizeText(doc.achievements || ''),
-    challenges: normalizeText(doc.challenges || ''),
-    followUp: normalizeText(doc.followUp || ''),
-    notes: normalizeText(doc.notes || '')
+    teacherName: normalizeText(doc.teacherName || doc.teacherLabel || doc.docente || ''),
+    studentGroup: normalizeText(doc.studentGroup || doc.groupName || doc.grupo || ''),
+    objective: normalizeText(doc.objective || doc.objetivo || ''),
+    activities: normalizeText(doc.activities || doc.actividades || doc.activity || ''),
+    achievements: normalizeText(doc.achievements || doc.logros || doc.advances || doc.avances || ''),
+    challenges: normalizeText(doc.challenges || doc.retos || doc.difficulties || doc.dificultades || ''),
+    followUp: normalizeText(doc.followUp || doc.seguimiento || doc.nextSteps || doc.proyeccion || ''),
+    notes: normalizeText(doc.notes || doc.notas || doc.comments || doc.comentarios || ''),
+    extraDetails,
+    evidenceLinks,
+    imageLinks
   };
 }
 
@@ -1896,6 +2062,14 @@ function renderPunctualityModule() {
   }
   const schedules = STATE.data.schedule.items;
   const stats = getPunctualityStats(items, schedules);
+  const statusRows = [
+    ['A tiempo', stats.onTime, stats.totalComparable],
+    ['Antes de hora', stats.early, stats.totalComparable],
+    ['Tarde', stats.late, stats.totalComparable],
+    ['Abiertas', stats.open, stats.total],
+    ['Sin horario', stats.noSchedule, stats.total],
+    ['Sin entrada', stats.missingCheckIn, stats.total]
+  ];
 
   return `
     <section class="moduleSurface">
@@ -1913,29 +2087,82 @@ function renderPunctualityModule() {
           ['Con horario asociado', stats.withSchedule],
           ['Puntuales', stats.onTime],
           ['Tardes', stats.late],
+          ['Antes de hora', stats.early],
           ['Sin horario asociado', stats.noSchedule],
           ['Sin salida', stats.open],
+          ['Minutos tarde acumulados', stats.totalLateMinutes],
           ['Puntualidad', `${stats.percent}%`],
           ['Promedio minutos tarde', stats.avgLate],
           ['Mayor retraso', `${stats.maxLate} min`]
         ].map(([label, value]) => `<article class="statCard"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
       </div>
-      <div class="teacherStatsGrid">
+
+      <div class="insightGrid">
+        <article class="insightPanel">
+          <h5 class="moduleFormTitle">Distribucion de estados</h5>
+          <div class="metricBars">
+            ${statusRows.map(([label, value, base]) => {
+              const percent = base ? Math.round((value / base) * 100) : 0;
+              return `
+                <div class="metricBarRow">
+                  <div class="metricBarTop"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)} (${percent}%)</strong></div>
+                  <div class="metricTrack"><span style="width:${Math.min(100, Math.max(0, percent))}%;"></span></div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </article>
+        <article class="insightPanel">
+          <h5 class="moduleFormTitle">Lectura rapida</h5>
+          <div class="insightList">
+            <span><strong>${escapeHtml(stats.bestTeacher?.teacherName || 'Sin ranking')}</strong> mejor puntualidad docente.</span>
+            <span><strong>${escapeHtml(stats.mostLateTeacher?.teacherName || 'Sin tardanzas')}</strong> concentra mas llegadas tarde.</span>
+            <span><strong>${escapeHtml(stats.mostAffectedDay?.day || 'Sin dia critico')}</strong> es el dia con mas minutos tarde.</span>
+            <span><strong>${escapeHtml(stats.mostAffectedArea?.label || 'Sin area critica')}</strong> requiere mayor seguimiento por area/lugar.</span>
+          </div>
+        </article>
+      </div>
+
+      <div class="teacherStatsGrid analyticsGrid">
         ${stats.teachers.map((teacher) => `
           <article class="teacherStatCard">
             <strong>${escapeHtml(teacher.teacherName)}</strong>
             <span>Total: ${teacher.total}</span>
+            <span>Comparables: ${teacher.comparable}</span>
             <span>Puntuales: ${teacher.onTime}</span>
+            <span>Antes de hora: ${teacher.early}</span>
             <span>Tardes: ${teacher.late}</span>
             <span>${teacher.percent}% puntualidad</span>
             <span>Promedio retraso: ${teacher.avgLate} min</span>
+            <span>Retraso acumulado: ${teacher.totalLateMinutes} min</span>
             <small>Ultimo registro: ${escapeHtml(formatDate(teacher.last, { withTime: true }))}</small>
           </article>
         `).join('')}
       </div>
+
+      <div class="analyticsColumns">
+        ${[
+          ['Por dia', stats.days, 'day'],
+          ['Por area o lugar', stats.areas, 'label']
+        ].map(([title, rows, labelField]) => `
+          <article class="insightPanel">
+            <h5 class="moduleFormTitle">${escapeHtml(title)}</h5>
+            <div class="compactTable">
+              ${(rows || []).length ? rows.map((row) => `
+                <div class="compactRow">
+                  <strong>${escapeHtml(row[labelField] || 'Sin dato')}</strong>
+                  <span>${row.percent}% puntualidad</span>
+                  <small>${row.total} registros · ${row.late} tarde · ${row.totalLateMinutes} min tarde</small>
+                </div>
+              `).join('') : '<p class="moduleIntro">Sin datos suficientes.</p>'}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+
       <div class="recordList">
         ${stats.classified.map((item) => `
-          <article class="recordCard">
+          <article class="recordCard" data-punctuality-id="${escapeHtml(item.id)}">
             <div class="recordCardTop">
               <div>
                 <div class="recordTitle">${escapeHtml(item.teacherName)}</div>
@@ -1946,11 +2173,49 @@ function renderPunctualityModule() {
             <div class="recordBody">
               ${escapeHtml([
                 item.punctuality.schedule ? `Horario: ${item.punctuality.schedule.startTime} - ${item.punctuality.schedule.endTime}` : 'Horario: sin horario asociado',
+                item.punctuality.schedule?.area ? `Area: ${item.punctuality.schedule.area}` : '',
+                item.punctuality.schedule?.place ? `Lugar: ${item.punctuality.schedule.place}` : '',
                 item.checkIn ? `Entrada: ${formatDate(item.checkIn, { withTime: true })}` : '',
                 item.checkOut ? `Salida: ${formatDate(item.checkOut, { withTime: true })}` : 'Sin salida registrada',
                 Number.isFinite(item.punctuality.diff) ? `Diferencia: ${item.punctuality.diff > 0 ? '+' : ''}${item.punctuality.diff} min` : ''
               ].filter(Boolean).join(' Â· '))}
             </div>
+            ${canManagePunctualityRecords() ? `
+              <div class="recordActions">
+                <button class="btnGhost" type="button" data-punctuality-edit="${escapeHtml(item.id)}">Editar</button>
+                <button class="btnGhost dangerBtn" type="button" data-punctuality-delete="${escapeHtml(item.id)}">Eliminar</button>
+              </div>
+              ${punctualityEditorState.editingId === item.id ? `
+                <form class="moduleAdminForm punctualityEditForm" data-punctuality-form="${escapeHtml(item.id)}">
+                  <label class="field">
+                    <span class="fieldLabel">Fecha visible</span>
+                    <input class="input" type="date" name="date" value="${escapeHtml(dateInputFromAny(item.date || item.checkIn || ''))}" />
+                  </label>
+                  <label class="field">
+                    <span class="fieldLabel">Entrada</span>
+                    <input class="input" type="datetime-local" name="checkIn" value="${escapeHtml(datetimeInputFromAny(item.checkIn || item.date || ''))}" />
+                  </label>
+                  <label class="field">
+                    <span class="fieldLabel">Salida</span>
+                    <input class="input" type="datetime-local" name="checkOut" value="${escapeHtml(datetimeInputFromAny(item.checkOut || ''))}" />
+                  </label>
+                  <label class="field">
+                    <span class="fieldLabel">Estado</span>
+                    <select class="input" name="status">
+                      ${[
+                        ['open', 'Abierta'],
+                        ['closed', 'Cerrada'],
+                        ['manual', 'Ajuste manual']
+                      ].map(([value, label]) => `<option value="${value}"${safeLower(item.status) === value ? ' selected' : ''}>${label}</option>`).join('')}
+                    </select>
+                  </label>
+                  <div class="recordActions fieldSpan2">
+                    <button class="btnPrimary" type="submit">Guardar cambios</button>
+                    <button class="btnGhost" type="button" data-punctuality-cancel>Cancelar</button>
+                  </div>
+                </form>
+              ` : ''}
+            ` : ''}
           </article>
         `).join('')}
       </div>
@@ -2019,6 +2284,12 @@ function renderAttendanceModule() {
     return (item.statusSummary?.[filter] || 0) > 0;
   });
   const allStats = getAttendanceStats(STATE.data.attendance.items);
+  const statusRows = [
+    ['Presentes', allStats.presente, allStats.total],
+    ['Ausentes', allStats.ausente, allStats.total],
+    ['Tardes', allStats.tarde, allStats.total],
+    ['Excusados', allStats.excusado, allStats.total]
+  ];
 
   return `
     <section class="moduleSurface">
@@ -2038,23 +2309,74 @@ function renderAttendanceModule() {
           ['Ausentes', allStats.ausente],
           ['Tardes', allStats.tarde],
           ['Excusados', allStats.excusado],
+          ['Sesiones con ausentes', allStats.sessionsWithAbsent],
+          ['Sesiones perfectas', allStats.sessionsWithoutAbsent],
           ['Asistencia general', `${allStats.percent}%`],
-          ['Promedio por sesion', allStats.avgSession]
+          ['Promedio por sesion', allStats.avgSession],
+          ['Mayor lista registrada', allStats.maxSessionSize]
         ].map(([label, value]) => `<article class="statCard"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
       </div>
 
+      <div class="insightGrid">
+        <article class="insightPanel">
+          <h5 class="moduleFormTitle">Distribucion de asistencia</h5>
+          <div class="metricBars">
+            ${statusRows.map(([label, value, base]) => {
+              const percent = base ? Math.round((value / base) * 100) : 0;
+              return `
+                <div class="metricBarRow">
+                  <div class="metricBarTop"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)} (${percent}%)</strong></div>
+                  <div class="metricTrack"><span style="width:${Math.min(100, Math.max(0, percent))}%;"></span></div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </article>
+        <article class="insightPanel">
+          <h5 class="moduleFormTitle">Focos de analisis</h5>
+          <div class="insightList">
+            <span><strong>${escapeHtml(allStats.bestArea?.area || 'Sin area')}</strong> tiene mejor asistencia.</span>
+            <span><strong>${escapeHtml(allStats.riskArea?.area || 'Sin area')}</strong> necesita seguimiento por ausencias.</span>
+            <span><strong>${escapeHtml(allStats.largestSession?.sessionName || 'Sin sesion')}</strong> fue la sesion con mas registros.</span>
+            <span><strong>${escapeHtml(allStats.recentSession?.sessionName || 'Sin registro reciente')}</strong> es la sesion mas reciente.</span>
+          </div>
+        </article>
+      </div>
+
       ${allStats.areas.length ? `
-        <div class="areaStatsGrid">
+        <div class="areaStatsGrid analyticsGrid">
           ${allStats.areas.map((area) => `
             <article class="areaStatCard">
               <strong>${escapeHtml(area.area)}</strong>
               <span>${area.sessions} sesiones</span>
               <span>${area.participants} participantes unicos</span>
+              <span>${area.absent} ausencias</span>
+              <span>${area.late} tardanzas</span>
               <span>${area.percent}% asistencia</span>
             </article>
           `).join('')}
         </div>
       ` : ''}
+
+      <div class="analyticsColumns">
+        ${[
+          ['Por sede/lugar', allStats.sites, 'site'],
+          ['Por dia', allStats.days, 'day']
+        ].map(([title, rows, labelField]) => `
+          <article class="insightPanel">
+            <h5 class="moduleFormTitle">${escapeHtml(title)}</h5>
+            <div class="compactTable">
+              ${(rows || []).length ? rows.map((row) => `
+                <div class="compactRow">
+                  <strong>${escapeHtml(row[labelField] || 'Sin dato')}</strong>
+                  <span>${row.percent}% asistencia</span>
+                  <small>${row.sessions} sesiones · ${row.total} registros · ${row.absent} ausencias</small>
+                </div>
+              `).join('') : '<p class="moduleIntro">Sin datos suficientes.</p>'}
+            </div>
+          </article>
+        `).join('')}
+      </div>
 
       <div class="toolbarRow">
         <label class="field">
@@ -2124,6 +2446,43 @@ function renderAttendanceModule() {
   `;
 }
 
+function renderLogSection(label, value) {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return `
+    <section class="logDetailSection">
+      <h6>${escapeHtml(label)}</h6>
+      <p>${escapeHtml(text)}</p>
+    </section>
+  `;
+}
+
+function renderLogEvidence(item) {
+  const imageLinks = uniqueText(item.imageLinks || [], 30);
+  const allLinks = uniqueText([...(item.evidenceLinks || []), ...imageLinks], 40);
+  const docLinks = allLinks.filter((url) => !imageLinks.includes(url));
+  if (!imageLinks.length && !docLinks.length) return '';
+  return `
+    <section class="logDetailSection logEvidenceSection">
+      <h6>Evidencias</h6>
+      ${imageLinks.length ? `
+        <div class="logImageGrid">
+          ${imageLinks.map((url, index) => `
+            <a class="logImageLink" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
+              <img src="${escapeHtml(url)}" alt="Evidencia ${index + 1} de ${escapeHtml(item.sessionName || 'bitacora')}" loading="lazy" />
+            </a>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${docLinks.length ? `
+        <div class="recordActions logLinkList">
+          ${docLinks.map((url, index) => `<a class="btnGhost" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Abrir evidencia ${index + 1}</a>`).join('')}
+        </div>
+      ` : ''}
+    </section>
+  `;
+}
+
 function renderLogsModule() {
   const q = safeLower(STATE.filters.search);
   const activeArea = safeLower(STATE.filters.logsArea || 'all');
@@ -2188,13 +2547,15 @@ function renderLogsModule() {
                 </div>
                 <span class="statusPill statusOk">${currentIndex + 1} / ${items.length}</span>
               </div>
-              <div class="recordBody">
-                <strong>Objetivo:</strong> ${escapeHtml(currentItem.objective || 'Sin objetivo registrado.')}<br>
-                <strong>Actividades:</strong> ${escapeHtml(currentItem.activities || 'Sin actividades registradas.')}<br>
-                ${currentItem.achievements ? `<strong>Logros:</strong> ${escapeHtml(currentItem.achievements)}<br>` : ''}
-                ${currentItem.challenges ? `<strong>Retos:</strong> ${escapeHtml(currentItem.challenges)}<br>` : ''}
-                ${currentItem.notes ? `<strong>Notas:</strong> ${escapeHtml(currentItem.notes)}<br>` : ''}
-                ${currentItem.followUp ? `<strong>Seguimiento:</strong> ${escapeHtml(currentItem.followUp)}` : ''}
+              <div class="recordBody logDetailBody">
+                ${renderLogSection('Objetivo', currentItem.objective || 'Sin objetivo registrado.')}
+                ${renderLogSection('Actividades', currentItem.activities || 'Sin actividades registradas.')}
+                ${renderLogSection('Logros', currentItem.achievements)}
+                ${renderLogSection('Retos', currentItem.challenges)}
+                ${renderLogSection('Seguimiento', currentItem.followUp)}
+                ${renderLogSection('Notas', currentItem.notes)}
+                ${(currentItem.extraDetails || []).map((detail) => renderLogSection(detail.label, detail.value)).join('')}
+                ${renderLogEvidence(currentItem)}
               </div>
               <div class="recordActions">
                 <button class="btnGhost" type="button" id="logs-prev"${currentIndex <= 0 ? ' disabled' : ''}>Apunte anterior</button>
@@ -2482,39 +2843,88 @@ function classifyPunctuality(shift, schedules = []) {
 function getPunctualityStats(shifts = [], schedules = []) {
   const classified = shifts.map((shift) => ({ ...shift, punctuality: classifyPunctuality(shift, schedules) }));
   const withSchedule = classified.filter((item) => item.punctuality.schedule && item.punctuality.type !== 'missingCheckIn');
-  const onTime = withSchedule.filter((item) => item.punctuality.type === 'onTime' || item.punctuality.type === 'early').length;
+  const comparable = withSchedule.filter((item) => ['onTime', 'early', 'late'].includes(item.punctuality.type));
+  const early = withSchedule.filter((item) => item.punctuality.type === 'early').length;
+  const onTimeOnly = withSchedule.filter((item) => item.punctuality.type === 'onTime').length;
+  const onTime = onTimeOnly + early;
   const lateItems = withSchedule.filter((item) => item.punctuality.type === 'late');
   const open = classified.filter((item) => item.punctuality.type === 'open').length;
   const noSchedule = classified.filter((item) => item.punctuality.type === 'noSchedule').length;
+  const missingCheckIn = classified.filter((item) => item.punctuality.type === 'missingCheckIn').length;
   const teacherMap = new Map();
-  classified.forEach((item) => {
-    const key = item.teacherEmail || item.teacherName || item.id;
-    if (!teacherMap.has(key)) teacherMap.set(key, { teacherName: item.teacherName, total: 0, onTime: 0, late: 0, lateMinutes: [], last: item.date || item.checkIn });
-    const row = teacherMap.get(key);
+  const dayMap = new Map();
+  const areaMap = new Map();
+  const addGroupRow = (map, key, item) => {
+    const label = normalizeText(key || 'Sin dato') || 'Sin dato';
+    if (!map.has(label)) map.set(label, { label, total: 0, comparable: 0, onTime: 0, early: 0, late: 0, totalLateMinutes: 0 });
+    const row = map.get(label);
     row.total += 1;
+    if (['onTime', 'early', 'late'].includes(item.punctuality.type)) row.comparable += 1;
     if (item.punctuality.type === 'onTime' || item.punctuality.type === 'early') row.onTime += 1;
+    if (item.punctuality.type === 'early') row.early += 1;
     if (item.punctuality.type === 'late') {
       row.late += 1;
-      row.lateMinutes.push(Math.max(0, item.punctuality.diff || 0));
+      row.totalLateMinutes += Math.max(0, item.punctuality.diff || 0);
+    }
+  };
+  classified.forEach((item) => {
+    const key = item.teacherEmail || item.teacherName || item.id;
+    if (!teacherMap.has(key)) teacherMap.set(key, { teacherName: item.teacherName, total: 0, comparable: 0, onTime: 0, early: 0, late: 0, lateMinutes: [], totalLateMinutes: 0, last: item.date || item.checkIn });
+    const row = teacherMap.get(key);
+    row.total += 1;
+    if (['onTime', 'early', 'late'].includes(item.punctuality.type)) row.comparable += 1;
+    if (item.punctuality.type === 'onTime' || item.punctuality.type === 'early') row.onTime += 1;
+    if (item.punctuality.type === 'early') row.early += 1;
+    if (item.punctuality.type === 'late') {
+      row.late += 1;
+      const lateMinutes = Math.max(0, item.punctuality.diff || 0);
+      row.lateMinutes.push(lateMinutes);
+      row.totalLateMinutes += lateMinutes;
     }
     if (toMillis(item.checkIn || item.date) > toMillis(row.last)) row.last = item.checkIn || item.date;
+    addGroupRow(dayMap, getWeekdayLabel(item.checkIn || item.date) || item.punctuality.schedule?.day || 'Sin fecha', item);
+    addGroupRow(areaMap, item.punctuality.schedule?.area || item.punctuality.schedule?.place || 'Sin area/lugar', item);
   });
+  const teacherRows = [...teacherMap.values()].map((item) => ({
+    ...item,
+    percent: item.comparable ? Math.round((item.onTime / item.comparable) * 100) : 0,
+    avgLate: item.lateMinutes.length ? Math.round(item.lateMinutes.reduce((sum, val) => sum + val, 0) / item.lateMinutes.length) : 0
+  })).sort((a, b) => a.teacherName.localeCompare(b.teacherName, 'es'));
+  const groupRows = (map, labelKey) => [...map.values()].map((item) => ({
+    [labelKey]: item.label,
+    label: item.label,
+    total: item.total,
+    comparable: item.comparable,
+    onTime: item.onTime,
+    early: item.early,
+    late: item.late,
+    totalLateMinutes: item.totalLateMinutes,
+    percent: item.comparable ? Math.round((item.onTime / item.comparable) * 100) : 0
+  })).sort((a, b) => b.totalLateMinutes - a.totalLateMinutes || a.percent - b.percent).slice(0, 8);
+  const dayRows = groupRows(dayMap, 'day');
+  const areaRows = groupRows(areaMap, 'label');
   return {
     classified,
     total: classified.length,
     withSchedule: withSchedule.length,
+    totalComparable: comparable.length,
+    early,
     onTime,
     late: lateItems.length,
     noSchedule,
     open,
-    percent: withSchedule.length ? Math.round((onTime / withSchedule.length) * 100) : 0,
+    missingCheckIn,
+    totalLateMinutes: lateItems.reduce((sum, item) => sum + Math.max(0, item.punctuality.diff || 0), 0),
+    percent: comparable.length ? Math.round((onTime / comparable.length) * 100) : 0,
     avgLate: lateItems.length ? Math.round(lateItems.reduce((sum, item) => sum + Math.max(0, item.punctuality.diff || 0), 0) / lateItems.length) : 0,
     maxLate: lateItems.length ? Math.max(...lateItems.map((item) => Math.max(0, item.punctuality.diff || 0))) : 0,
-    teachers: [...teacherMap.values()].map((item) => ({
-      ...item,
-      percent: item.total ? Math.round((item.onTime / item.total) * 100) : 0,
-      avgLate: item.lateMinutes.length ? Math.round(item.lateMinutes.reduce((sum, val) => sum + val, 0) / item.lateMinutes.length) : 0
-    })).sort((a, b) => a.teacherName.localeCompare(b.teacherName, 'es'))
+    teachers: teacherRows,
+    days: dayRows,
+    areas: areaRows,
+    bestTeacher: [...teacherRows].filter((teacher) => teacher.comparable > 0).sort((a, b) => b.percent - a.percent || b.total - a.total)[0] || null,
+    mostLateTeacher: [...teacherRows].sort((a, b) => b.totalLateMinutes - a.totalLateMinutes || b.late - a.late)[0] || null,
+    mostAffectedDay: dayRows[0] || null,
+    mostAffectedArea: areaRows[0] || null
   };
 }
 
@@ -2961,6 +3371,7 @@ async function openWorkspaceModule(moduleId) {
   STATE.filters.logsArea = 'all';
   STATE.filters.logsIndex = 0;
   if (moduleId !== 'calendar') calendarEditorState.editingId = '';
+  if (moduleId !== 'punctuality') punctualityEditorState.editingId = '';
 
   if (moduleId === 'schedule') {
     await readCollection('team', true);
@@ -3401,6 +3812,40 @@ function bindWorkspaceModal() {
       return;
     }
 
+    const punctualityEditBtn = event.target.closest('[data-punctuality-edit]');
+    if (punctualityEditBtn) {
+      const id = punctualityEditBtn.getAttribute('data-punctuality-edit');
+      const item = STATE.data.punctuality.items.find((entry) => entry.id === id);
+      if (!item || !canManagePunctualityRecords()) return;
+      punctualityEditorState.editingId = id;
+      renderWorkspaceModule();
+      document.querySelector(`[data-punctuality-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    if (event.target.closest('[data-punctuality-cancel]')) {
+      punctualityEditorState.editingId = '';
+      renderWorkspaceModule();
+      return;
+    }
+
+    const punctualityDeleteBtn = event.target.closest('[data-punctuality-delete]');
+    if (punctualityDeleteBtn) {
+      const id = punctualityDeleteBtn.getAttribute('data-punctuality-delete');
+      if (!id || !canManagePunctualityRecords()) return;
+      if (!window.confirm('Â¿Eliminar este registro de puntualidad? Esta acciÃ³n no se puede deshacer.')) return;
+      try {
+        await deleteDoc(doc(DB, COLLECTIONS.punctuality, id));
+        if (punctualityEditorState.editingId === id) punctualityEditorState.editingId = '';
+        await refreshActiveModule();
+        toast('Registro de puntualidad eliminado.');
+      } catch (error) {
+        console.error(error);
+        toast('No se pudo eliminar el registro de puntualidad.');
+      }
+      return;
+    }
+
     const calendarEditBtn = event.target.closest('[data-calendar-edit]');
     if (calendarEditBtn) {
       const id = calendarEditBtn.getAttribute('data-calendar-edit');
@@ -3489,6 +3934,46 @@ function bindWorkspaceModal() {
       STATE.filters.calendarYear = String(nextYear);
       STATE.filters.calendarMonth = String(month);
       renderWorkspaceModule();
+    }
+  });
+
+  $('#workspace-content')?.addEventListener('submit', async (event) => {
+    const punctualityForm = event.target.closest('[data-punctuality-form]');
+    if (!punctualityForm) return;
+    event.preventDefault();
+    if (!canManagePunctualityRecords()) return;
+
+    const id = punctualityForm.getAttribute('data-punctuality-form');
+    if (!id) return;
+    const checkIn = bogotaDatetimeInputToIso(punctualityForm.checkIn?.value || '');
+    const checkOut = bogotaDatetimeInputToIso(punctualityForm.checkOut?.value || '');
+    const date = normalizeText(punctualityForm.date?.value || '');
+    const status = normalizeText(punctualityForm.status?.value || (checkOut ? 'closed' : 'open'));
+
+    if (!checkIn) {
+      toast('La entrada es obligatoria.');
+      return;
+    }
+    if (checkOut && toMillis(checkOut) < toMillis(checkIn)) {
+      toast('La salida no puede ser anterior a la entrada.');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(DB, COLLECTIONS.punctuality, id), {
+        date,
+        checkIn,
+        checkOut: checkOut || null,
+        status,
+        updatedAt: serverTimestamp(),
+        updatedBy: ACTIVE_EMAIL
+      });
+      punctualityEditorState.editingId = '';
+      await refreshActiveModule();
+      toast('Registro de puntualidad actualizado.');
+    } catch (error) {
+      console.error(error);
+      toast('No se pudo actualizar el registro de puntualidad.');
     }
   });
 
@@ -3826,6 +4311,7 @@ async function mount() {
       ACTIVE_EMAIL = '';
       ACTIVE_PROFILE = null;
       scheduleEditorState.editingId = '';
+      punctualityEditorState.editingId = '';
       scheduleEditorState.placeListEditing = false;
       scheduleEditorState.placeDraft = [];
       scheduleEditorState.areaListEditing = false;
@@ -3863,6 +4349,7 @@ async function mount() {
     ACTIVE_EMAIL = email;
     ACTIVE_PROFILE = allowed;
     scheduleEditorState.editingId = '';
+    punctualityEditorState.editingId = '';
     scheduleEditorState.placeListEditing = false;
     scheduleEditorState.placeDraft = [];
     scheduleEditorState.areaListEditing = false;

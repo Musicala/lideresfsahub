@@ -1076,6 +1076,14 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   display:grid;
   gap:12px;
 }
+.punctualityEditForm{
+  margin-top:12px;
+  padding:14px;
+  border-radius:16px;
+  border:1px solid rgba(15,79,168,.14);
+  background:rgba(255,255,255,.62);
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
 .toolbarMeta{
   margin-left:auto;
   font-size:12px;
@@ -1186,6 +1194,54 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
 .logsDetailPanel .recordCard{
   min-height:300px;
 }
+.logDetailBody{
+  display:grid;
+  gap:12px;
+  line-height:1.55;
+}
+.logDetailSection{
+  border:1px solid rgba(16,34,58,.08);
+  border-radius:14px;
+  background:rgba(255,255,255,.50);
+  padding:12px;
+}
+.logDetailSection h6{
+  margin:0 0 6px;
+  font-size:12px;
+  font-weight:950;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--primary);
+}
+.logDetailSection p{
+  margin:0;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+}
+.logEvidenceSection{
+  background:rgba(255,252,246,.74);
+}
+.logImageGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:10px;
+}
+.logImageLink{
+  display:block;
+  overflow:hidden;
+  border-radius:14px;
+  border:1px solid rgba(16,34,58,.10);
+  background:#fff;
+  box-shadow:var(--shadow-xs);
+}
+.logImageLink img{
+  width:100%;
+  aspect-ratio:4/3;
+  object-fit:cover;
+}
+.logLinkList{
+  margin-top:10px;
+}
 .recordCard.areaPorras{
   border-color:rgba(212,116,45,.28);
   background:linear-gradient(160deg, rgba(212,116,45,.10), rgba(255,252,246,.84));
@@ -1276,6 +1332,76 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   margin-top:6px;
   font-size:1.45rem;
   color:var(--ink);
+}
+.analyticsGrid{
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+}
+.insightGrid,
+.analyticsColumns{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+  margin:16px 0;
+}
+.insightPanel{
+  border:1px solid rgba(12,65,196,.12);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,252,246,.78));
+  box-shadow:0 12px 30px rgba(24,45,93,.08);
+  padding:16px;
+  min-width:0;
+}
+.metricBars,
+.compactTable,
+.insightList{
+  display:grid;
+  gap:10px;
+}
+.metricBarTop{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  color:var(--muted);
+  font-size:.86rem;
+}
+.metricBarTop strong{
+  color:var(--ink);
+  white-space:nowrap;
+}
+.metricTrack{
+  height:9px;
+  border-radius:999px;
+  overflow:hidden;
+  background:rgba(12,65,196,.08);
+}
+.metricTrack span{
+  display:block;
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg, #1f7a6b, #0f4fa8);
+}
+.insightList span,
+.compactRow{
+  display:block;
+  border:1px solid rgba(12,65,196,.10);
+  border-radius:14px;
+  background:rgba(255,255,255,.62);
+  padding:10px 12px;
+  color:var(--muted);
+  font-size:.88rem;
+  line-height:1.35;
+}
+.insightList strong,
+.compactRow strong{
+  color:var(--ink);
+}
+.compactRow span,
+.compactRow small{
+  display:block;
+  margin-top:3px;
+}
+.compactRow small{
+  color:var(--muted);
 }
 .attendanceDetailCard{
   padding:0;
@@ -1980,7 +2106,10 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
 @media (max-width: 760px){
   .attendanceRow,
   .supportForm,
-  .supportAdminControls{
+  .supportAdminControls,
+  .punctualityEditForm,
+  .insightGrid,
+  .analyticsColumns{
     grid-template-columns:1fr;
   }
   .logoWrap{
