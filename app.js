@@ -25,6 +25,10 @@ const HUB = {
       label: 'Catalina Medina',
       role: 'admin'
     },
+    'musicalaasesor@gmail.com': {
+      label: 'Musicala Admin',
+      role: 'admin'
+    },
     'tsocialgs@fundacionsanantonio.org': {
       label: 'Andrea Herrera',
       role: 'lider'
