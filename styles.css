@@ -517,6 +517,7 @@ a{text-decoration:none;color:inherit}
 }
 .heroIntro,
 .heroFocus,
+.heroLiveStatus,
 .heroPrimaryGrid,
 .heroStats,
 .pendingBanner{
@@ -602,6 +603,113 @@ a{text-decoration:none;color:inherit}
   background:rgba(255,255,255,.10);
   border-color:rgba(255,255,255,.18);
   color:#fff;
+}
+
+.heroLiveStatus{
+  padding:16px;
+  border-radius:22px;
+  background:rgba(255,252,246,.86);
+  border:1px solid var(--line);
+  box-shadow:var(--shadow-xs);
+}
+.heroLiveHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.heroLiveEyebrow{
+  margin:0 0 4px;
+  font-size:11px;
+  font-weight:950;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:rgba(31,122,107,.86);
+}
+.heroLiveTitle{
+  margin:0;
+  font-size:18px;
+  line-height:1.2;
+  font-weight:950;
+}
+.heroLiveAction{
+  min-height:38px;
+  padding:0 12px;
+  white-space:nowrap;
+}
+.heroLiveSummary{
+  margin-top:10px;
+  font-size:13px;
+  line-height:1.45;
+  color:var(--muted);
+}
+.heroLiveSummary strong{
+  color:var(--ink);
+}
+.heroLiveList{
+  display:grid;
+  gap:8px;
+  margin-top:12px;
+}
+.heroLiveItem{
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto minmax(0, 1fr) auto;
+  align-items:center;
+  gap:10px;
+  padding:10px 11px;
+  border-radius:16px;
+  border:1px solid rgba(16,34,58,.08);
+  background:rgba(255,255,255,.62);
+}
+.heroLiveDot{
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  background:#d4742d;
+  box-shadow:0 0 0 4px rgba(212,116,45,.12);
+}
+.heroLiveItem.is-in .heroLiveDot{
+  background:#1f7a6b;
+  box-shadow:0 0 0 4px rgba(31,122,107,.12);
+}
+.heroLiveCopy{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.heroLiveCopy strong{
+  min-width:0;
+  font-size:13px;
+  line-height:1.2;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.heroLiveCopy small{
+  min-width:0;
+  font-size:11.5px;
+  line-height:1.25;
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.heroLiveBadge{
+  justify-self:end;
+  padding:5px 8px;
+  border-radius:999px;
+  background:rgba(212,116,45,.12);
+  color:#9d4f17;
+  font-size:10px;
+  line-height:1;
+  font-weight:950;
+  white-space:nowrap;
+}
+.heroLiveItem.is-in .heroLiveBadge{
+  background:rgba(31,122,107,.12);
+  color:#1f6b5f;
 }
 
 .heroPrimaryGrid{
@@ -2081,6 +2189,9 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   .workspaceHero{
     grid-template-columns:minmax(0, 1.2fr) minmax(300px, .95fr);
   }
+  .heroLiveStatus{
+    grid-column:1 / -1;
+  }
   .heroStats{
     grid-column:1 / -1;
     grid-template-columns:repeat(4, minmax(0, 1fr));
@@ -2190,6 +2301,18 @@ button[data-id="protocols"]{background:linear-gradient(135deg, rgba(185,77,43,.0
   }
   .heroStats{
     grid-template-columns:1fr;
+  }
+  .heroLiveHeader,
+  .heroLiveItem{
+    grid-template-columns:1fr;
+  }
+  .heroLiveAction,
+  .heroLiveBadge{
+    justify-self:start;
+  }
+  .heroLiveCopy strong,
+  .heroLiveCopy small{
+    white-space:normal;
   }
   .tile{
     min-height:110px;

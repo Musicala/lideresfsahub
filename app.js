@@ -25,10 +25,6 @@ const HUB = {
       label: 'Catalina Medina',
       role: 'admin'
     },
-    'musicalaasesor@gmail.com': {
-      label: 'Musicala Admin',
-      role: 'admin'
-    },
     'tsocialgs@fundacionsanantonio.org': {
       label: 'Andrea Herrera',
       role: 'lider'
@@ -865,6 +861,102 @@ function updateHeroSummary() {
   if (focusTitle) focusTitle.textContent = getCenterName();
   if (focusSub) focusSub.textContent = 'Supervision general del equipo, clases y seguimiento academico.';
   if (pendingBanner) pendingBanner.hidden = true;
+  renderHeroLiveStatus();
+}
+
+function getTodayShiftRows() {
+  const todayKey = bogotaDateKey();
+  const todayDay = normalizeDayKey(getWeekdayLabel(new Date()));
+  const schedules = STATE.data.schedule.items
+    .filter((item) => normalizeDayKey(item.day) === todayDay)
+    .sort((a, b) => {
+      const startA = parseTimeToMinutes(a.startTime) ?? 9999;
+      const startB = parseTimeToMinutes(b.startTime) ?? 9999;
+      return startA - startB || a.teacherName.localeCompare(b.teacherName, 'es');
+    });
+  const shifts = STATE.data.punctuality.items.filter((item) => isSameBogotaDay(item.checkIn || item.date, todayKey));
+
+  if (!schedules.length) {
+    return shifts
+      .sort((a, b) => toMillis(a.checkIn || a.date) - toMillis(b.checkIn || b.date))
+      .map((shift) => ({
+        schedule: {
+          teacherName: shift.teacherName,
+          teacherEmail: shift.teacherEmail,
+          teacherId: shift.teacherId,
+          startTime: '',
+          area: '',
+          place: ''
+        },
+        shift,
+        punctuality: null,
+        hasCheckIn: Boolean(shift.checkIn || shift.date),
+        scheduleMissing: true
+      }));
+  }
+
+  return schedules.map((schedule) => {
+    const matchingShifts = shifts
+      .filter((shift) => {
+        if (schedule.teacherEmail && shift.teacherEmail && comparableText(schedule.teacherEmail) === comparableText(shift.teacherEmail)) return true;
+        if (schedule.teacherId && shift.teacherId && comparableText(schedule.teacherId) === comparableText(shift.teacherId)) return true;
+        return comparableText(schedule.teacherName) && comparableText(schedule.teacherName) === comparableText(shift.teacherName);
+      })
+      .sort((a, b) => toMillis(b.checkIn || b.date) - toMillis(a.checkIn || a.date));
+    const shift = matchingShifts[0] || null;
+    const punctuality = shift ? classifyPunctuality(shift, [schedule]) : null;
+    return {
+      schedule,
+      shift,
+      punctuality,
+      hasCheckIn: Boolean(shift?.checkIn || shift?.date)
+    };
+  });
+}
+
+function renderHeroLiveStatus() {
+  const summary = $('#hero-live-summary');
+  const list = $('#hero-live-list');
+  if (!summary || !list) return;
+
+  if (!STATE.data.schedule.loaded || !STATE.data.punctuality.loaded) {
+    summary.textContent = 'Cargando marcajes de hoy...';
+    list.innerHTML = '';
+    return;
+  }
+
+  const rows = getTodayShiftRows();
+  const registered = rows.filter((row) => row.hasCheckIn).length;
+  const pending = rows.length - registered;
+  const scheduleMissing = rows.some((row) => row.scheduleMissing);
+  summary.innerHTML = rows.length
+    ? scheduleMissing
+      ? `<strong>${registered}</strong> registro${registered === 1 ? '' : 's'} de entrada hoy. Carga el horario para ver pendientes.`
+      : `<strong>${registered} de ${rows.length}</strong> docentes programados ya registraron entrada. ${pending ? `${pending} pendiente${pending === 1 ? '' : 's'}.` : 'Todos al dia.'}`
+    : 'No hay docentes programados para hoy en el horario cargado.';
+
+  list.innerHTML = rows.length ? rows.slice(0, 8).map((row) => {
+    const statusClass = row.hasCheckIn ? 'is-in' : 'is-pending';
+    const statusLabel = row.hasCheckIn ? 'Registro hecho' : 'Sin entrada';
+    const timeText = row.hasCheckIn
+      ? `Entrada ${formatDate(row.shift.checkIn || row.shift.date, { withTime: true, withYear: false })}`
+      : `Programado ${row.schedule.startTime || 'sin hora'}`;
+    const meta = [
+      row.schedule.area,
+      row.schedule.place,
+      row.punctuality?.label && row.hasCheckIn ? row.punctuality.label : ''
+    ].filter(Boolean).join(' - ');
+    return `
+      <article class="heroLiveItem ${statusClass}">
+        <span class="heroLiveDot" aria-hidden="true"></span>
+        <div class="heroLiveCopy">
+          <strong>${escapeHtml(row.schedule.teacherName || 'Docente')}</strong>
+          <small>${escapeHtml([timeText, meta].filter(Boolean).join(' - '))}</small>
+        </div>
+        <span class="heroLiveBadge">${escapeHtml(statusLabel)}</span>
+      </article>
+    `;
+  }).join('') : renderEmptyState('Sin horario para hoy', 'Cuando exista horario docente para este dia, aqui aparecera quien ya registro su jornada.');
 }
 
 function renderEmptyState(title, text) {
@@ -900,6 +992,22 @@ function formatDate(value, options = {}) {
   } catch (_) {
     return '-';
   }
+}
+
+function bogotaDateKey(value = new Date()) {
+  const ms = toMillis(value) || Date.now();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date(ms));
+  const pick = (type) => parts.find((part) => part.type === type)?.value || '';
+  return [pick('year'), pick('month'), pick('day')].filter(Boolean).join('-');
+}
+
+function isSameBogotaDay(value, dayKey = bogotaDateKey()) {
+  return Boolean(value && bogotaDateKey(value) === dayKey);
 }
 
 function sortByRecent(items, fields = ['updatedAt', 'createdAt', 'date']) {
@@ -1800,6 +1908,7 @@ async function readScheduleAreaOptions(force = false) {
 
 async function prefetchCoreData() {
   await Promise.all([
+    readCollection('schedule', true),
     readCollection('students', true),
     readCollection('attendance', true),
     readCollection('logs', true),
@@ -4104,6 +4213,7 @@ function bindWorkspaceModal() {
 
 function wireHeroActions() {
   $('#btn-hero-shift')?.addEventListener('click', () => triggerAccess('schedule'));
+  $('#btn-hero-live-punctuality')?.addEventListener('click', () => triggerAccess('punctuality'));
   $('#btn-hero-students')?.addEventListener('click', () => triggerAccess('students'));
   $('#btn-hero-attendance')?.addEventListener('click', () => triggerAccess('attendance'));
   $('#btn-hero-logs')?.addEventListener('click', () => triggerAccess('logs'));
